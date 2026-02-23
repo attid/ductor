@@ -111,7 +111,7 @@ class DockerManager:
         return rc == 0
 
     async def _build_image(self, image: str) -> bool:
-        dockerfile = self._paths.framework_root / "Dockerfile.sandbox"
+        dockerfile = self._paths.dockerfile_sandbox_path
         if not dockerfile.exists():
             logger.error("Dockerfile.sandbox not found at %s", dockerfile)
             return False

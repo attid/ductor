@@ -12,9 +12,12 @@ import pytest
 
 from ductor_bot.workspace.paths import DuctorPaths
 from ductor_bot.workspace.skill_sync import (
+    _MANAGED_MARKER,
     _clean_broken_links,
     _discover_skills,
+    _ensure_copy,
     _ensure_link,
+    _is_managed_copy,
     _is_under,
     _resolve_canonical,
     cleanup_ductor_links,
@@ -666,3 +669,168 @@ def test_cleanup_no_providers(tmp_path: Path) -> None:
 def test_bundled_skills_dir_property(tmp_path: Path) -> None:
     paths = _make_paths(tmp_path)
     assert paths.bundled_skills_dir == paths.home_defaults / "workspace" / "skills"
+
+
+# ---------------------------------------------------------------------------
+# Group 14: Docker copy mode -- _is_managed_copy / _ensure_copy
+# ---------------------------------------------------------------------------
+
+
+def test_is_managed_copy_false_for_normal_dir(tmp_path: Path) -> None:
+    d = tmp_path / "skill"
+    d.mkdir()
+    assert _is_managed_copy(d) is False
+
+
+def test_is_managed_copy_false_for_symlink(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    assert _is_managed_copy(link) is False
+
+
+def test_is_managed_copy_true_with_marker(tmp_path: Path) -> None:
+    d = tmp_path / "skill"
+    d.mkdir()
+    (d / _MANAGED_MARKER).touch()
+    assert _is_managed_copy(d) is True
+
+
+def test_ensure_copy_creates_new(tmp_path: Path) -> None:
+    source = _make_skill(tmp_path / "src", "my-skill")
+    dest = tmp_path / "dest" / "my-skill"
+    dest.parent.mkdir(parents=True)
+    assert _ensure_copy(dest, source) is True
+    assert dest.is_dir()
+    assert not dest.is_symlink()
+    assert (dest / "SKILL.md").read_text() == "# my-skill"
+    assert (dest / _MANAGED_MARKER).is_file()
+
+
+def test_ensure_copy_skips_user_dir(tmp_path: Path) -> None:
+    source = _make_skill(tmp_path / "src", "sk")
+    dest = _make_skill(tmp_path / "dest", "sk")
+    (dest / "SKILL.md").write_text("# user version")
+    assert _ensure_copy(dest, source) is False
+    assert (dest / "SKILL.md").read_text() == "# user version"
+
+
+def test_ensure_copy_replaces_symlink(tmp_path: Path) -> None:
+    source = _make_skill(tmp_path / "src", "sk")
+    real = tmp_path / "old"
+    real.mkdir()
+    dest = tmp_path / "dest" / "sk"
+    dest.parent.mkdir(parents=True)
+    dest.symlink_to(real)
+    assert _ensure_copy(dest, source) is True
+    assert not dest.is_symlink()
+    assert (dest / _MANAGED_MARKER).is_file()
+
+
+def test_ensure_copy_updates_stale(tmp_path: Path) -> None:
+    import time
+
+    source = _make_skill(tmp_path / "src", "sk")
+    dest = tmp_path / "dest" / "sk"
+    dest.parent.mkdir(parents=True)
+    _ensure_copy(dest, source)
+    marker_mtime = (dest / _MANAGED_MARKER).stat().st_mtime
+
+    time.sleep(0.05)
+    (source / "SKILL.md").write_text("# updated")
+
+    assert _ensure_copy(dest, source) is True
+    assert (dest / "SKILL.md").read_text() == "# updated"
+    assert (dest / _MANAGED_MARKER).stat().st_mtime > marker_mtime
+
+
+def test_ensure_copy_idempotent(tmp_path: Path) -> None:
+    source = _make_skill(tmp_path / "src", "sk")
+    dest = tmp_path / "dest" / "sk"
+    dest.parent.mkdir(parents=True)
+    _ensure_copy(dest, source)
+    assert _ensure_copy(dest, source) is False
+
+
+# ---------------------------------------------------------------------------
+# Group 15: Docker copy mode -- sync_skills / sync_bundled_skills
+# ---------------------------------------------------------------------------
+
+
+def test_sync_docker_copies_instead_of_links(tmp_path: Path) -> None:
+    paths, claude_skills, _ = _setup_three_dirs(tmp_path)
+    claude_skills.mkdir(parents=True, exist_ok=True)
+    _make_skill(paths.skills_dir, "my-skill")
+    with patch("ductor_bot.workspace.skill_sync._cli_skill_dirs") as mock:
+        mock.return_value = {"claude": claude_skills}
+        sync_skills(paths, docker_active=True)
+    dest = claude_skills / "my-skill"
+    assert dest.is_dir()
+    assert not dest.is_symlink()
+    assert _is_managed_copy(dest)
+    assert (dest / "SKILL.md").read_text() == "# my-skill"
+
+
+def test_sync_docker_preserves_user_dirs(tmp_path: Path) -> None:
+    paths, claude_skills, _ = _setup_three_dirs(tmp_path)
+    _make_skill(claude_skills, "shared")
+    _make_skill(paths.skills_dir, "shared")
+    (claude_skills / "shared" / "SKILL.md").write_text("# user version")
+    with patch("ductor_bot.workspace.skill_sync._cli_skill_dirs") as mock:
+        mock.return_value = {"claude": claude_skills}
+        sync_skills(paths, docker_active=True)
+    assert not (claude_skills / "shared").is_symlink()
+    assert (claude_skills / "shared" / "SKILL.md").read_text() == "# user version"
+
+
+def test_sync_docker_idempotent(tmp_path: Path) -> None:
+    paths, claude_skills, _ = _setup_three_dirs(tmp_path)
+    claude_skills.mkdir(parents=True, exist_ok=True)
+    _make_skill(paths.skills_dir, "sk")
+    with patch("ductor_bot.workspace.skill_sync._cli_skill_dirs") as mock:
+        mock.return_value = {"claude": claude_skills}
+        sync_skills(paths, docker_active=True)
+        sync_skills(paths, docker_active=True)
+    assert _is_managed_copy(claude_skills / "sk")
+
+
+def test_bundled_docker_copies(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    _make_skill(paths.bundled_skills_dir, "bundled-sk")
+    paths.skills_dir.mkdir(parents=True)
+
+    sync_bundled_skills(paths, docker_active=True)
+
+    target = paths.skills_dir / "bundled-sk"
+    assert target.is_dir()
+    assert not target.is_symlink()
+    assert _is_managed_copy(target)
+    assert (target / "SKILL.md").read_text() == "# bundled-sk"
+
+
+def test_bundled_docker_preserves_user_dir(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    _make_skill(paths.bundled_skills_dir, "sk")
+    user_sk = _make_skill(paths.skills_dir, "sk")
+    (user_sk / "SKILL.md").write_text("# custom")
+
+    sync_bundled_skills(paths, docker_active=True)
+
+    assert not (paths.skills_dir / "sk").is_symlink()
+    assert (paths.skills_dir / "sk" / "SKILL.md").read_text() == "# custom"
+
+
+def test_bundled_docker_replaces_old_symlink(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    _make_skill(paths.bundled_skills_dir, "sk")
+    paths.skills_dir.mkdir(parents=True)
+    old = tmp_path / "old"
+    old.mkdir()
+    (paths.skills_dir / "sk").symlink_to(old)
+
+    sync_bundled_skills(paths, docker_active=True)
+
+    target = paths.skills_dir / "sk"
+    assert not target.is_symlink()
+    assert _is_managed_copy(target)

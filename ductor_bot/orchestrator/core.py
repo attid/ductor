@@ -54,9 +54,20 @@ from ductor_bot.workspace.init import (
     watch_rule_files,
 )
 from ductor_bot.workspace.paths import DuctorPaths, resolve_paths
-from ductor_bot.workspace.skill_sync import cleanup_ductor_links, watch_skill_sync
+from ductor_bot.workspace.skill_sync import (
+    cleanup_ductor_links,
+    sync_bundled_skills,
+    sync_skills,
+    watch_skill_sync,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _docker_skill_resync(paths: DuctorPaths) -> None:
+    """Re-run skill sync with copies so skills resolve inside Docker."""
+    sync_bundled_skills(paths, docker_active=True)
+    sync_skills(paths, docker_active=True)
 
 
 class Orchestrator:
@@ -137,6 +148,9 @@ class Orchestrator:
             else:
                 logger.warning("Docker enabled but setup failed; running on host")
 
+        if docker_container:
+            await asyncio.to_thread(_docker_skill_resync, paths)
+
         await asyncio.to_thread(
             inject_runtime_environment, paths, docker_container=docker_container
         )
@@ -199,7 +213,9 @@ class Orchestrator:
         await orch._cleanup_observer.start()
         orch._rule_sync_task = asyncio.create_task(watch_rule_files(paths.workspace))
         logger.info("Rule file watcher started (CLAUDE.md <-> AGENTS.md)")
-        orch._skill_sync_task = asyncio.create_task(watch_skill_sync(paths))
+        orch._skill_sync_task = asyncio.create_task(
+            watch_skill_sync(paths, docker_active=bool(docker_container))
+        )
         logger.info("Skill sync watcher started")
 
         return orch

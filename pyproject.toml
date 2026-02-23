@@ -69,11 +69,13 @@ packages = ["ductor_bot"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "config.example.json" = "ductor_bot/_config_example.json"
+"Dockerfile.sandbox" = "ductor_bot/_Dockerfile.sandbox"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "ductor_bot/",
     "config.example.json",
+    "Dockerfile.sandbox",
     "LICENSE",
     "README.md",
     "pyproject.toml",

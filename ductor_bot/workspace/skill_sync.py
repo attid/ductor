@@ -6,6 +6,10 @@ Codex CLI, or the ductor workspace are visible to all agents.
 Includes bundled-skill linking (package → workspace), sync-time external-symlink
 protection, and cleanup of ductor-created links on shutdown.
 
+When Docker sandboxing is active, symlinks are replaced with directory copies
+(marked with ``.ductor_managed``) because absolute host paths do not resolve
+inside the container's mount namespace.
+
 Sync runs once during ``init_workspace`` and periodically as a background task.
 """
 
@@ -14,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +34,7 @@ _SKIP_DIRS: frozenset[str] = frozenset(
 )
 
 _SKILL_SYNC_INTERVAL = 30.0
+_MANAGED_MARKER = ".ductor_managed"
 
 
 def _is_under(child: Path, parent: Path) -> bool:
@@ -156,6 +162,48 @@ def _ensure_link(link_path: Path, target: Path) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Docker-aware copy helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_managed_copy(path: Path) -> bool:
+    """Return ``True`` if *path* is a ductor-managed copy (has marker file)."""
+    return path.is_dir() and not path.is_symlink() and (path / _MANAGED_MARKER).is_file()
+
+
+def _newest_mtime(directory: Path) -> float:
+    """Return the newest mtime of any file or directory under *directory*."""
+    newest = directory.stat().st_mtime
+    for entry in directory.rglob("*"):
+        newest = max(newest, entry.stat().st_mtime)
+    return newest
+
+
+def _ensure_copy(dest: Path, source: Path) -> bool:
+    """Copy *source* directory to *dest* with a ``.ductor_managed`` marker.
+
+    Skips the copy when *dest* already has the marker and *source* has not
+    been modified since the last copy (recursive mtime comparison).
+
+    Returns ``True`` if a new copy was made.
+    """
+    marker = dest / _MANAGED_MARKER
+    if _is_managed_copy(dest):
+        if _newest_mtime(source) <= marker.stat().st_mtime:
+            return False
+        shutil.rmtree(dest)
+    elif dest.exists() and not dest.is_symlink():
+        return False
+
+    if dest.is_symlink():
+        dest.unlink()
+
+    shutil.copytree(source, dest, symlinks=True)
+    marker.touch()
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Broken link cleanup
 # ---------------------------------------------------------------------------
 
@@ -177,36 +225,61 @@ def _clean_broken_links(directory: Path) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _should_skip_link(dest: Path, sync_roots: frozenset[Path]) -> bool:
+    """Return ``True`` if *dest* should be left alone during symlink sync."""
+    if dest.exists() and not dest.is_symlink():
+        return True
+    if dest.is_symlink() and dest.exists():
+        resolved = dest.resolve()
+        return not any(_is_under(resolved, root) for root in sync_roots)
+    return False
+
+
+def _should_skip_copy(dest: Path) -> bool:
+    """Return ``True`` if *dest* should be left alone during copy sync."""
+    return dest.exists() and not dest.is_symlink() and not _is_managed_copy(dest)
+
+
 def _link_skill_everywhere(
     skill_name: str,
     canonical: Path,
     all_dirs: dict[str, Path],
+    *,
+    use_copies: bool = False,
 ) -> None:
-    """Create symlinks for *skill_name* in every location that lacks it.
+    """Create symlinks (or copies) for *skill_name* in every location that lacks it.
 
     Preserves existing symlinks that point outside the known sync directories
     (user-managed external links are never touched).
+
+    When *use_copies* is ``True`` (Docker mode), directories are copied
+    instead of symlinked so they resolve inside the container.
     """
-    sync_roots = {d.resolve() for d in all_dirs.values() if d.is_dir()}
+    sync_roots = frozenset(d.resolve() for d in all_dirs.values() if d.is_dir())
     for loc_name, base_dir in all_dirs.items():
         if not base_dir.is_dir():
             base_dir.mkdir(parents=True, exist_ok=True)
-        link = base_dir / skill_name
-        if link == canonical or (link.exists() and not link.is_symlink()):
+        dest = base_dir / skill_name
+        if dest == canonical:
             continue
-        if link.is_symlink() and link.exists():
-            resolved = link.resolve()
-            if not any(_is_under(resolved, root) for root in sync_roots):
-                continue
+        skip = _should_skip_copy(dest) if use_copies else _should_skip_link(dest, sync_roots)
+        if skip:
+            continue
         try:
-            if _ensure_link(link, canonical):
-                logger.info("Skill link created: %s -> %s", link, canonical)
+            if use_copies:
+                if _ensure_copy(dest, canonical):
+                    logger.info("Skill copied: %s -> %s", dest, canonical)
+            elif _ensure_link(dest, canonical):
+                logger.info("Skill link created: %s -> %s", dest, canonical)
         except OSError:
-            logger.warning("Failed to link skill %s in %s", skill_name, loc_name, exc_info=True)
+            logger.warning("Failed to sync skill %s in %s", skill_name, loc_name, exc_info=True)
 
 
-def sync_skills(paths: DuctorPaths) -> None:
+def sync_skills(paths: DuctorPaths, *, docker_active: bool = False) -> None:
     """Three-way skill directory sync: ductor workspace <-> CLI skill dirs.
+
+    When *docker_active* is ``True``, copies are used instead of symlinks
+    so skills resolve inside the Docker container.
 
     Safety guarantees:
     - Real directories are never overwritten or removed.
@@ -230,7 +303,7 @@ def sync_skills(paths: DuctorPaths) -> None:
             registries.get("codex", {}),
         )
         if canonical is not None:
-            _link_skill_everywhere(skill_name, canonical, all_dirs)
+            _link_skill_everywhere(skill_name, canonical, all_dirs, use_copies=docker_active)
 
     for base_dir in all_dirs.values():
         removed = _clean_broken_links(base_dir)
@@ -238,44 +311,52 @@ def sync_skills(paths: DuctorPaths) -> None:
             logger.info("Cleaned %d broken skill link(s) in %s", removed, base_dir)
 
 
-def sync_bundled_skills(paths: DuctorPaths) -> None:
-    """Symlink bundled skills from the package into the ductor workspace.
+def _iter_bundled_entries(paths: DuctorPaths) -> list[tuple[Path, Path]]:
+    """Return ``(source, target)`` pairs for each bundled skill."""
+    bundled = paths.bundled_skills_dir
+    if not bundled.is_dir():
+        return []
+    target_dir = paths.skills_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    pairs: list[tuple[Path, Path]] = []
+    for entry in sorted(bundled.iterdir()):
+        if not entry.is_dir() or entry.name.startswith(".") or entry.name in _SKIP_DIRS:
+            continue
+        pairs.append((entry, target_dir / entry.name))
+    return pairs
 
-    Creates symlinks from ``~/.ductor/workspace/skills/<name>`` to the
-    package's ``_home_defaults/workspace/skills/<name>`` so bundled skills
+
+def sync_bundled_skills(paths: DuctorPaths, *, docker_active: bool = False) -> None:
+    """Sync bundled skills from the package into the ductor workspace.
+
+    Creates symlinks (or copies when *docker_active*) from
+    ``~/.ductor/workspace/skills/<name>`` to the package's
+    ``_home_defaults/workspace/skills/<name>`` so bundled skills
     stay up-to-date with the installed ductor version.
 
     Real directories are never overwritten (preserves user modifications
     from older Zone 3 copies or manually created skills with the same name).
     """
-    bundled = paths.bundled_skills_dir
-    if not bundled.is_dir():
-        return
-
-    target_dir = paths.skills_dir
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    for entry in sorted(bundled.iterdir()):
-        if not entry.is_dir() or entry.name.startswith("."):
+    for source, target in _iter_bundled_entries(paths):
+        if docker_active:
+            try:
+                if _ensure_copy(target, source):
+                    logger.info("Bundled skill copied: %s -> %s", target, source)
+            except OSError:
+                logger.warning("Failed to copy bundled skill %s", source.name, exc_info=True)
             continue
-        if entry.name in _SKIP_DIRS:
-            continue
-
-        target = target_dir / entry.name
 
         if target.exists() and not target.is_symlink():
             continue
-
         if target.is_symlink():
-            if target.resolve() == entry.resolve():
+            if target.resolve() == source.resolve():
                 continue
             target.unlink()
-
         try:
-            _create_dir_link(target, entry)
-            logger.info("Bundled skill linked: %s -> %s", target, entry)
+            _create_dir_link(target, source)
+            logger.info("Bundled skill linked: %s -> %s", target, source)
         except OSError:
-            logger.warning("Failed to link bundled skill %s", entry.name, exc_info=True)
+            logger.warning("Failed to link bundled skill %s", source.name, exc_info=True)
 
 
 def cleanup_ductor_links(paths: DuctorPaths) -> int:
@@ -316,6 +397,7 @@ def cleanup_ductor_links(paths: DuctorPaths) -> int:
 async def watch_skill_sync(
     paths: DuctorPaths,
     *,
+    docker_active: bool = False,
     interval: float = _SKILL_SYNC_INTERVAL,
 ) -> None:
     """Continuously sync skill directories across all agents.
@@ -326,6 +408,6 @@ async def watch_skill_sync(
     while True:
         await asyncio.sleep(interval)
         try:
-            await asyncio.to_thread(sync_skills, paths)
+            await asyncio.to_thread(sync_skills, paths, docker_active=docker_active)
         except Exception:
             logger.exception("Skill sync failed")

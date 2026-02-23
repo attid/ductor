@@ -114,6 +114,14 @@ class DuctorPaths:
             return repo_path
         return _PKG_DIR / "_config_example.json"
 
+    @property
+    def dockerfile_sandbox_path(self) -> Path:
+        """Dockerfile.sandbox: repo root (dev) or package-bundled (installed)."""
+        repo_path = self.framework_root / "Dockerfile.sandbox"
+        if repo_path.is_file():
+            return repo_path
+        return _PKG_DIR / "_Dockerfile.sandbox"
+
 
 def resolve_paths(
     ductor_home: str | Path | None = None,
