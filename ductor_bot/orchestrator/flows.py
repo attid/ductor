@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from ductor_bot.bot.response_format import SESSION_ERROR_TEXT
+from ductor_bot.bot.response_format import session_error_text
 from ductor_bot.cli.types import AgentRequest, AgentResponse
 from ductor_bot.log_context import set_log_context
 from ductor_bot.orchestrator.hooks import HookContext
@@ -105,12 +105,13 @@ async def _reset_on_error(
     *,
     model_name: str,
     provider_name: str,
+    cli_detail: str = "",
 ) -> OrchestratorResult:
     """Kill processes, preserve session, return user-facing error."""
     await orch._process_registry.kill_all(chat_id)
     logger.warning("Session error preserved model=%s provider=%s", model_name, provider_name)
     return OrchestratorResult(
-        text=SESSION_ERROR_TEXT.format(model=model_name),
+        text=session_error_text(model_name, cli_detail),
     )
 
 
@@ -194,6 +195,7 @@ async def normal(
             chat_id,
             model_name=model_name,
             provider_name=provider_name,
+            cli_detail=response.result,
         )
     await _update_session(orch, session, response)
     logger.info("Normal flow completed")
@@ -246,6 +248,7 @@ async def normal_streaming(  # noqa: PLR0913
             chat_id,
             model_name=model_name,
             provider_name=provider_name,
+            cli_detail=response.result,
         )
     await _update_session(orch, session, response)
     logger.info("Streaming flow completed")

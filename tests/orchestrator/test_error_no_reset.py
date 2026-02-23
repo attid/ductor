@@ -171,3 +171,64 @@ async def test_streaming_no_auto_retry_on_resume_failure(orch: Orchestrator) -> 
     assert mock_streaming.call_count == 1
     request = mock_streaming.call_args[0][0]
     assert request.resume_session == "sess-keep"
+
+
+# -- CLI error detail forwarding --
+
+
+async def test_auth_error_shows_hint(orch: Orchestrator) -> None:
+    error_text = "401 Unauthorized: Your authentication token has been invalidated."
+    object.__setattr__(
+        orch._cli_service,
+        "execute",
+        AsyncMock(return_value=_mock_response(is_error=True, result=error_text)),
+    )
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+
+    result = await normal(orch, 1, "Test")
+
+    assert "Session Error" in result.text
+    assert "Authentication failed" in result.text
+    assert "re-authenticate" in result.text
+
+
+async def test_rate_limit_error_shows_hint(orch: Orchestrator) -> None:
+    error_text = "429 Too Many Requests: rate limit exceeded"
+    object.__setattr__(
+        orch._cli_service,
+        "execute",
+        AsyncMock(return_value=_mock_response(is_error=True, result=error_text)),
+    )
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+
+    result = await normal(orch, 1, "Test")
+
+    assert "Rate limit" in result.text
+
+
+async def test_unknown_error_shows_detail_line(orch: Orchestrator) -> None:
+    error_text = "Something unexpected happened\nSecond line"
+    object.__setattr__(
+        orch._cli_service,
+        "execute",
+        AsyncMock(return_value=_mock_response(is_error=True, result=error_text)),
+    )
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+
+    result = await normal(orch, 1, "Test")
+
+    assert "Something unexpected happened" in result.text
+    assert "Second line" not in result.text
+
+
+async def test_streaming_auth_error_shows_hint(orch: Orchestrator) -> None:
+    error_text = "status 401 Unauthorized: token has been invalidated"
+    mock_streaming = AsyncMock(
+        return_value=_mock_response(is_error=True, result=error_text),
+    )
+    object.__setattr__(orch._cli_service, "execute_streaming", mock_streaming)
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+
+    result = await normal_streaming(orch, 1, "Test")
+
+    assert "Authentication failed" in result.text
