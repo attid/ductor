@@ -78,8 +78,8 @@ def _add_job(mgr: CronManager, paths: DuctorPaths, **overrides: Any) -> CronJob:
 
 
 @time_machine.travel("2025-06-15T23:30:00+00:00")
-async def test_cron_skips_during_global_quiet_hours(tmp_path: Path) -> None:
-    """Job is skipped when current hour falls within global quiet hours (21-8)."""
+async def test_cron_ignores_heartbeat_quiet_hours(tmp_path: Path) -> None:
+    """Job runs even during heartbeat quiet hours when no job-level quiet hours are set."""
     paths = _make_paths(tmp_path)
     mgr = _make_manager(paths)
     obs = _make_observer(
@@ -93,10 +93,14 @@ async def test_cron_skips_during_global_quiet_hours(tmp_path: Path) -> None:
     result_handler = AsyncMock()
     obs.set_result_handler(result_handler)
 
-    await obs._execute_job("test-job", "do something", "test_task")
+    with patch("ductor_bot.cron.execution.build_cmd", return_value=None):
+        await obs._execute_job("test-job", "do something", "test_task")
 
-    # Result handler NOT called because job was skipped
-    result_handler.assert_not_awaited()
+    # Job proceeded past quiet hours check (heartbeat config is ignored for cron)
+    job = mgr.get_job("test-job")
+    assert job is not None
+    assert job.last_run_status is not None
+    assert "cli_not_found" in job.last_run_status
 
 
 @time_machine.travel("2025-06-15T14:00:00+00:00")
@@ -150,17 +154,12 @@ async def test_cron_respects_task_specific_quiet_hours(tmp_path: Path) -> None:
 
 
 @time_machine.travel("2025-06-15T21:00:00+00:00")
-async def test_cron_quiet_hours_boundary_start(tmp_path: Path) -> None:
-    """Start hour is inclusive: hour 21 IS quiet for global 21-8."""
+async def test_cron_job_quiet_hours_boundary_start(tmp_path: Path) -> None:
+    """Start hour is inclusive: hour 21 IS quiet for job-level 21-8."""
     paths = _make_paths(tmp_path)
     mgr = _make_manager(paths)
-    obs = _make_observer(
-        paths,
-        mgr,
-        user_timezone="UTC",
-        heartbeat=HeartbeatConfig(quiet_start=21, quiet_end=8),
-    )
-    _add_job(mgr, paths)
+    obs = _make_observer(paths, mgr, user_timezone="UTC")
+    _add_job(mgr, paths, quiet_start=21, quiet_end=8)
 
     result_handler = AsyncMock()
     obs.set_result_handler(result_handler)
@@ -172,17 +171,12 @@ async def test_cron_quiet_hours_boundary_start(tmp_path: Path) -> None:
 
 
 @time_machine.travel("2025-06-15T08:00:00+00:00")
-async def test_cron_quiet_hours_boundary_end(tmp_path: Path) -> None:
-    """End hour is exclusive: hour 8 is NOT quiet for global 21-8."""
+async def test_cron_job_quiet_hours_boundary_end(tmp_path: Path) -> None:
+    """End hour is exclusive: hour 8 is NOT quiet for job-level 21-8."""
     paths = _make_paths(tmp_path)
     mgr = _make_manager(paths)
-    obs = _make_observer(
-        paths,
-        mgr,
-        user_timezone="UTC",
-        heartbeat=HeartbeatConfig(quiet_start=21, quiet_end=8),
-    )
-    _add_job(mgr, paths)
+    obs = _make_observer(paths, mgr, user_timezone="UTC")
+    _add_job(mgr, paths, quiet_start=21, quiet_end=8)
 
     result_handler = AsyncMock()
     obs.set_result_handler(result_handler)

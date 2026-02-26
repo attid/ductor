@@ -90,8 +90,8 @@ def _default_overrides() -> TaskOverrides:
 
 
 @time_machine.travel("2025-06-15T23:30:00+00:00")
-async def test_webhook_cron_task_skips_during_quiet_hours(tmp_path: Path) -> None:
-    """Webhook cron_task returns skipped:quiet_hours when in global quiet window."""
+async def test_webhook_ignores_heartbeat_quiet_hours(tmp_path: Path) -> None:
+    """Webhook cron_task runs even during heartbeat quiet hours when no hook-level quiet hours."""
     paths = _make_paths(tmp_path)
     mgr = _make_manager(paths)
     obs = _make_observer(
@@ -102,15 +102,17 @@ async def test_webhook_cron_task_skips_during_quiet_hours(tmp_path: Path) -> Non
     )
     _add_hook(mgr, paths)
 
-    result = await obs._dispatch_cron_task(
-        "test-hook",
-        "Test Hook",
-        "test_task",
-        "test prompt",
-        _default_overrides(),
-    )
+    with patch("ductor_bot.cron.execution.build_cmd", return_value=None):
+        result = await obs._dispatch_cron_task(
+            "test-hook",
+            "Test Hook",
+            "test_task",
+            "test prompt",
+            _default_overrides(),
+        )
 
-    assert result.status == "skipped:quiet_hours"
+    # Passed quiet-hours check (heartbeat config is ignored for webhooks)
+    assert "cli_not_found" in result.status
     assert result.hook_id == "test-hook"
     assert result.mode == "cron_task"
 

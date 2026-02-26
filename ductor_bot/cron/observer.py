@@ -108,6 +108,7 @@ class CronObserver:
 
     async def _on_file_change(self) -> None:
         """Reload manager in a thread, then reschedule."""
+        logger.info("File watcher detected cron_jobs.json change, rescheduling")
         await asyncio.to_thread(self._manager.reload)
         await self._reschedule_locked()
 
@@ -214,7 +215,7 @@ class CronObserver:
                 scheduled_job.task_folder,
             )
         except asyncio.CancelledError:
-            logger.debug("Cron job %s cancelled during execution", scheduled_job.id)
+            logger.warning("Cron job %s cancelled during execution", scheduled_job.id)
             return
         except Exception:
             logger.exception("Cron job %s failed unexpectedly", scheduled_job.id)
@@ -311,8 +312,15 @@ class CronObserver:
                     timeout_label="Cron job",
                 )
             except asyncio.CancelledError:
-                logger.debug("Cron job %s cancelled, subprocess terminated", job_id)
+                logger.warning("Cron job %s cancelled during subprocess", job_id)
                 raise
+
+            logger.info(
+                "Cron subprocess returned job=%s status=%s has_execution=%s",
+                job_id,
+                result.status,
+                result.execution is not None,
+            )
 
             if result.execution is None:
                 # CLI not found — deliver error to chat, then persist status
@@ -360,12 +368,20 @@ class CronObserver:
 
     def _is_quiet_hours(self, job: CronJob | None, job_title: str) -> bool:
         """Return True when the job must be skipped due to quiet-hour settings."""
+        job_start = job.quiet_start if job else None
+        job_end = job.quiet_end if job else None
+
+        # Cron jobs only respect quiet hours explicitly set on the job itself.
+        # Do NOT fall back to heartbeat quiet hours.
+        if job_start is None and job_end is None:
+            return False
+
         is_quiet, now_hour, tz = check_quiet_hour(
-            quiet_start=job.quiet_start if job else None,
-            quiet_end=job.quiet_end if job else None,
+            quiet_start=job_start,
+            quiet_end=job_end,
             user_timezone=self._config.user_timezone,
-            global_quiet_start=self._config.heartbeat.quiet_start,
-            global_quiet_end=self._config.heartbeat.quiet_end,
+            global_quiet_start=0,
+            global_quiet_end=0,
         )
         if not is_quiet:
             return False

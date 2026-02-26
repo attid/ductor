@@ -268,15 +268,22 @@ class WebhookObserver:
 
         # Get webhook entry for quiet hour settings
         hook = self._manager.get_hook(hook_id)
+        hook_start = hook.quiet_start if hook else None
+        hook_end = hook.quiet_end if hook else None
 
-        # Check quiet hours (use hook-specific or global defaults)
-        is_quiet, now_hour, tz = check_quiet_hour(
-            quiet_start=hook.quiet_start if hook else None,
-            quiet_end=hook.quiet_end if hook else None,
-            user_timezone=self._config.user_timezone,
-            global_quiet_start=self._config.heartbeat.quiet_start,
-            global_quiet_end=self._config.heartbeat.quiet_end,
-        )
+        # Webhooks only respect quiet hours explicitly set on the hook itself.
+        # Do NOT fall back to heartbeat quiet hours.
+        if hook_start is not None or hook_end is not None:
+            is_quiet, now_hour, tz = check_quiet_hour(
+                quiet_start=hook_start,
+                quiet_end=hook_end,
+                user_timezone=self._config.user_timezone,
+                global_quiet_start=0,
+                global_quiet_end=0,
+            )
+        else:
+            is_quiet = False
+
         if is_quiet:
             logger.debug(
                 "Webhook cron_task skipped: quiet hours (%d:00 %s) hook=%s",
