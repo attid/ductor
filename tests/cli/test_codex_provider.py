@@ -404,7 +404,7 @@ class TestSend:
 
         assert resp.is_error is True
         assert resp.timed_out is True
-        proc.kill.assert_called_once()
+        proc.wait.assert_awaited_once()
 
     async def test_send_with_process_registry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         registry = ProcessRegistry()
@@ -566,7 +566,7 @@ class TestSendStreaming:
         result_events = [e for e in events if isinstance(e, ResultEvent)]
         assert len(result_events) == 1
         assert result_events[0].is_error is True
-        proc.kill.assert_called_once()
+        proc.wait.assert_awaited_once()
 
     async def test_streaming_no_stdout_raises_runtime_error(
         self, monkeypatch: pytest.MonkeyPatch

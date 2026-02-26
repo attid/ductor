@@ -253,7 +253,7 @@ class TestSend:
         assert resp.timed_out is True
         assert resp.is_error is True
         assert resp.result == ""
-        proc.kill.assert_called_once()
+        proc.wait.assert_awaited_once()
 
     async def test_empty_stdout_is_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(monkeypatch)
@@ -434,7 +434,7 @@ class TestSendStreaming:
         assert len(events) == 1
         assert isinstance(events[0], ResultEvent)
         assert events[0].is_error is True
-        proc.kill.assert_called_once()
+        proc.wait.assert_awaited_once()
 
     async def test_nonzero_exit_yields_error_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(monkeypatch)

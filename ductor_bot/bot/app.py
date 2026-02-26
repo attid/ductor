@@ -72,6 +72,7 @@ logger = logging.getLogger(__name__)
 
 _WELCOME_IMAGE = Path(__file__).resolve().parent / "ductor_images" / "welcome.png"
 _CAPTION_LIMIT = 1024
+_CRON_ACK_MARKERS = ("message sent successfully", "delivered to telegram")
 
 # Backward-compatible patch points used by tests.
 TypingContext = _TypingContext
@@ -86,6 +87,20 @@ def _help_line(command: str) -> str:
     """Return one command line for the help panel."""
     description = _CMD_DESC.get(command, "")
     return f"/{command} -- {description}" if description else f"/{command}"
+
+
+def _is_cron_transport_ack_line(line: str) -> bool:
+    """Return True for known transport confirmation lines from task tools."""
+    normalized = " ".join(line.lower().split())
+    return all(marker in normalized for marker in _CRON_ACK_MARKERS)
+
+
+def _sanitize_cron_result_text(result: str) -> str:
+    """Strip tool transport confirmations from cron result text."""
+    if not result:
+        return ""
+    lines = [line for line in result.splitlines() if not _is_cron_transport_ack_line(line)]
+    return "\n".join(lines).strip()
 
 
 _HELP_TEXT = fmt(
@@ -779,7 +794,17 @@ class TelegramBot:
 
     async def _on_cron_result(self, title: str, result: str, status: str) -> None:
         """Send cron job result to all allowed users."""
-        text = f"**TASK: {title}**\n\n{result}" if result else f"**TASK: {title}**\n\n_{status}_"
+        clean_result = _sanitize_cron_result_text(result)
+        if result and not clean_result and status == "success":
+            logger.debug(
+                "Cron result only had transport confirmations; skipping broadcast task=%s", title
+            )
+            return
+        text = (
+            f"**TASK: {title}**\n\n{clean_result}"
+            if clean_result
+            else f"**TASK: {title}**\n\n_{status}_"
+        )
         await self._broadcast(text, allowed_roots=self._file_roots(self._orch.paths))
 
     async def _on_heartbeat_result(self, chat_id: int, text: str) -> None:

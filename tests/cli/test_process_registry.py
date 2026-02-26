@@ -6,7 +6,7 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ductor_bot.cli.process_registry import ProcessRegistry, TrackedProcess, _kill_process_tree
+from ductor_bot.cli.process_registry import ProcessRegistry, TrackedProcess, kill_process_tree
 
 
 def _mock_process(*, pid: int = 1, returncode: int | None = None) -> MagicMock:
@@ -137,23 +137,20 @@ async def test_kill_stale_kills_and_unregisters_old_entries() -> None:
         killed = await reg.kill_stale(max_age_seconds=60)
 
     assert killed == 1
-    assert old_proc.terminate.called
     assert reg.has_active(1) is True  # fresh process remains
 
 
-async def test_kill_stale_handles_process_lookup_error() -> None:
+async def test_kill_stale_handles_already_exited() -> None:
     reg = ProcessRegistry()
-    proc = _mock_process(pid=40)
-    proc.terminate.side_effect = ProcessLookupError()
+    proc = _mock_process(pid=40, returncode=0)
     tracked = reg.register(chat_id=1, process=proc, label="gone")
     tracked.registered_at = time.time() - 1000
 
-    with patch("ductor_bot.cli.process_registry.asyncio.sleep", new_callable=AsyncMock):
-        killed = await reg.kill_stale(max_age_seconds=60)
-
+    killed = await reg.kill_stale(max_age_seconds=60)
     assert killed == 0
 
 
-def test_kill_process_tree_swallows_oserror() -> None:
-    with patch("ductor_bot.cli.process_registry.subprocess.run", side_effect=OSError()):
-        _kill_process_tree(1234)
+def test_kill_process_tree_delegates_to_force_kill() -> None:
+    with patch("ductor_bot.cli.process_registry.force_kill_process_tree") as mock_fk:
+        kill_process_tree(1234)
+    mock_fk.assert_called_once_with(1234)

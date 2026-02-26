@@ -5,18 +5,19 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import signal
-import sys
 import time
 from pathlib import Path
+
+from ductor_bot.infra.process_tree import (
+    force_kill_process_tree,
+    list_process_descendants,
+    terminate_process_tree,
+)
 
 logger = logging.getLogger(__name__)
 
 _KILL_WAIT_SECONDS = 5.0
 _KILL_POLL_INTERVAL = 0.2
-
-_IS_WINDOWS = sys.platform == "win32"
-
 
 def _is_process_alive(pid: int) -> bool:
     """Check if a process with the given PID is still running."""
@@ -33,21 +34,19 @@ def _is_process_alive(pid: int) -> bool:
 
 
 def _terminate_process(pid: int) -> None:
-    """Send termination signal (SIGTERM on POSIX, TerminateProcess on Windows)."""
-    os.kill(pid, signal.SIGTERM)
+    """Send a graceful termination signal to a process tree."""
+    terminate_process_tree(pid)
 
 
 def _force_kill_process(pid: int) -> None:
-    """Force-kill process (SIGKILL on POSIX, TerminateProcess on Windows)."""
-    if _IS_WINDOWS:
-        os.kill(pid, signal.SIGTERM)
-    else:
-        os.kill(pid, signal.SIGKILL)
+    """Force-kill a process tree."""
+    force_kill_process_tree(pid)
 
 
 def _kill_and_wait(pid: int) -> None:
     """Send termination signal, wait for exit, escalate to force-kill if needed."""
     logger.info("Stopping existing bot instance (pid=%d)", pid)
+    descendants = [child for child in list_process_descendants(pid) if child != os.getpid()]
     try:
         _terminate_process(pid)
     except OSError:
@@ -55,16 +54,42 @@ def _kill_and_wait(pid: int) -> None:
         return
 
     deadline = time.monotonic() + _KILL_WAIT_SECONDS
-    while time.monotonic() < deadline:
-        if not _is_process_alive(pid):
-            logger.info("Previous instance (pid=%d) exited cleanly", pid)
-            return
+    while _is_process_alive(pid) and time.monotonic() < deadline:
         time.sleep(_KILL_POLL_INTERVAL)
 
-    logger.warning("pid=%d did not exit after %.0fs, force killing", pid, _KILL_WAIT_SECONDS)
-    with contextlib.suppress(OSError):
-        _force_kill_process(pid)
-    time.sleep(_KILL_POLL_INTERVAL)
+    if _is_process_alive(pid):
+        logger.warning("pid=%d did not exit after %.0fs, force killing", pid, _KILL_WAIT_SECONDS)
+        with contextlib.suppress(OSError):
+            _force_kill_process(pid)
+        time.sleep(_KILL_POLL_INTERVAL)
+    else:
+        logger.info("Previous instance (pid=%d) exited cleanly", pid)
+
+    alive_desc = _alive_pids(descendants)
+    if not alive_desc:
+        return
+
+    logger.warning(
+        "Cleaning up %d orphan child process(es) for pid=%d",
+        len(alive_desc),
+        pid,
+    )
+    for child_pid in alive_desc:
+        with contextlib.suppress(OSError):
+            _force_kill_process(child_pid)
+
+    child_deadline = time.monotonic() + _KILL_WAIT_SECONDS
+    remaining = _alive_pids(alive_desc)
+    while remaining and time.monotonic() < child_deadline:
+        time.sleep(_KILL_POLL_INTERVAL)
+        remaining = _alive_pids(remaining)
+
+    if remaining:
+        logger.warning("Some child processes did not exit: %s", ",".join(str(p) for p in remaining))
+
+
+def _alive_pids(pids: list[int]) -> list[int]:
+    return [pid for pid in pids if _is_process_alive(pid)]
 
 
 def acquire_lock(*, pid_file: Path, kill_existing: bool = False) -> None:

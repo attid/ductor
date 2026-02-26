@@ -68,14 +68,25 @@ def test_format_age_days() -> None:
     assert format_age(dt) == "2d ago"
 
 
+def _patch_claude_cli_fallback(monkeypatch: pytest.MonkeyPatch, *, logged_in: bool = False) -> None:
+    """Disable the subprocess fallback so tests stay fast and deterministic."""
+    import ductor_bot.cli.auth as _auth_mod
+
+    monkeypatch.setattr(_auth_mod, "_claude_cli_logged_in", lambda: logged_in)
+
+
 def test_check_claude_auth_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _patch_claude_cli_fallback(monkeypatch)
     result = check_claude_auth()
     assert result.status == AuthStatus.NOT_FOUND
 
 
 def test_check_claude_auth_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _patch_claude_cli_fallback(monkeypatch)
     (tmp_path / ".claude").mkdir()
     result = check_claude_auth()
     assert result.status == AuthStatus.INSTALLED
@@ -83,6 +94,8 @@ def test_check_claude_auth_installed(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 def test_check_claude_auth_authenticated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _patch_claude_cli_fallback(monkeypatch)
     claude_dir = tmp_path / ".claude"
     claude_dir.mkdir()
     (claude_dir / ".credentials.json").write_text("{}")
@@ -91,9 +104,85 @@ def test_check_claude_auth_authenticated(tmp_path: Path, monkeypatch: pytest.Mon
     assert result.auth_file is not None
 
 
+def test_check_claude_auth_env_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    _patch_claude_cli_fallback(monkeypatch)
+    result = check_claude_auth()
+    assert result.status == AuthStatus.AUTHENTICATED
+
+
+def test_check_claude_auth_env_key_empty_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    _patch_claude_cli_fallback(monkeypatch)
+    result = check_claude_auth()
+    assert result.status == AuthStatus.NOT_FOUND
+
+
+def test_check_claude_auth_cli_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _patch_claude_cli_fallback(monkeypatch, logged_in=True)
+    result = check_claude_auth()
+    assert result.status == AuthStatus.AUTHENTICATED
+
+
+def test_check_claude_auth_cli_fallback_not_logged_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _patch_claude_cli_fallback(monkeypatch, logged_in=False)
+    (tmp_path / ".claude").mkdir()
+    result = check_claude_auth()
+    assert result.status == AuthStatus.INSTALLED
+
+
+def test_claude_cli_logged_in_parses_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    import ductor_bot.cli.auth as _auth_mod
+
+    class _FakeResult:
+        stdout = '{"loggedIn": true, "authMethod": "claude.ai"}'
+
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult())
+    assert _auth_mod._claude_cli_logged_in() is True
+
+
+def test_claude_cli_logged_in_returns_false_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    import ductor_bot.cli.auth as _auth_mod
+
+    def _raise(*_a: object, **_kw: object) -> None:
+        raise FileNotFoundError("claude not found")
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    assert _auth_mod._claude_cli_logged_in() is False
+
+
+def test_claude_cli_logged_in_returns_false_when_not_logged_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    import ductor_bot.cli.auth as _auth_mod
+
+    class _FakeResult:
+        stdout = '{"loggedIn": false}'
+
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult())
+    assert _auth_mod._claude_cli_logged_in() is False
+
+
 def test_check_codex_auth_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     result = check_codex_auth()
     assert result.status == AuthStatus.NOT_FOUND
 
@@ -103,8 +192,39 @@ def test_check_codex_auth_authenticated(tmp_path: Path, monkeypatch: pytest.Monk
     codex_dir.mkdir()
     (codex_dir / "auth.json").write_text("{}")
     monkeypatch.setenv("CODEX_HOME", str(codex_dir))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     result = check_codex_auth()
     assert result.status == AuthStatus.AUTHENTICATED
+
+
+def test_check_codex_auth_env_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    result = check_codex_auth()
+    assert result.status == AuthStatus.AUTHENTICATED
+
+
+def test_check_codex_auth_env_key_empty_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    result = check_codex_auth()
+    assert result.status == AuthStatus.NOT_FOUND
+
+
+def test_check_codex_auth_config_toml_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.toml").write_text("[mcp]")
+    monkeypatch.setenv("CODEX_HOME", str(codex_dir))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    result = check_codex_auth()
+    assert result.status == AuthStatus.INSTALLED
 
 
 # -- Gemini auth --

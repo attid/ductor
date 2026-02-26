@@ -1077,6 +1077,34 @@ class TestOnCronResult:
         assert "**TASK: Deploy**" in text
         assert "_failed_" in text
 
+    @patch("ductor_bot.bot.app.send_rich", new_callable=AsyncMock)
+    async def test_strips_transport_ack_line_from_result(self, mock_send: AsyncMock) -> None:
+        tg_bot, _ = _make_tg_bot()
+        tg_bot._orchestrator = _make_orchestrator()
+
+        await tg_bot._on_cron_result(
+            "Hallo Nachricht",
+            'Hallo, wie geht es dir?\n\nMessage sent successfully. "Hallo, wie geht es dir?" delivered to Telegram (message_id 5585).',
+            "success",
+        )
+
+        text = mock_send.call_args[0][2]
+        assert "Hallo, wie geht es dir?" in text
+        assert "Message sent successfully" not in text
+
+    @patch("ductor_bot.bot.app.send_rich", new_callable=AsyncMock)
+    async def test_skips_ack_only_success_result(self, mock_send: AsyncMock) -> None:
+        tg_bot, _ = _make_tg_bot()
+        tg_bot._orchestrator = _make_orchestrator()
+
+        await tg_bot._on_cron_result(
+            "Hallo Nachricht",
+            'Message sent successfully. "Hallo, wie geht es dir?" delivered to Telegram (message_id 5585).',
+            "success",
+        )
+
+        mock_send.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # _on_heartbeat_result

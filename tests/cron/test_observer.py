@@ -189,6 +189,29 @@ class TestCronObserverScheduling:
         mtime_mock.assert_awaited_once()
         reschedule_mock.assert_awaited_once()
 
+    async def test_request_reschedule_coalesces_pending_task(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        observer = _make_observer(paths, mgr)
+        observer._running = True
+
+        pending_task = MagicMock()
+        pending_task.done.return_value = False
+
+        def _create_task(coro: object) -> MagicMock:
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            return pending_task
+
+        with patch(
+            "ductor_bot.cron.observer.asyncio.create_task", side_effect=_create_task
+        ) as create:
+            observer.request_reschedule()
+            observer.request_reschedule()
+
+        create.assert_called_once()
+
 
 class TestCronObserverExecution:
     """Job execution tests."""

@@ -172,6 +172,10 @@ async def _reschedule_now(orch: Orchestrator) -> None:
     observer = orch._cron_observer
     if observer is None:
         return
+    request_reschedule = getattr(observer, "request_reschedule", None)
+    if callable(request_reschedule):
+        request_reschedule()
+        return
     await observer.reschedule_now()
 
 

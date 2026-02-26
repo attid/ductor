@@ -527,5 +527,12 @@ def run_smart_reset(ductor_home: Path) -> None:
     if not confirmed:
         _abort()
 
-    shutil.rmtree(ductor_home)
-    console.print("[dim]Workspace deleted.[/dim]\n")
+    from ductor_bot.__main__ import _robust_rmtree
+
+    _robust_rmtree(ductor_home)
+    if ductor_home.exists():
+        console.print(
+            f"[yellow]Warning: Could not fully delete {ductor_home}. Remove manually.[/yellow]\n"
+        )
+    else:
+        console.print("[dim]Workspace deleted.[/dim]\n")

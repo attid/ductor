@@ -29,6 +29,7 @@ from ductor_bot.cli.gemini_utils import (
 from ductor_bot.cli.stream_events import ResultEvent, StreamEvent, SystemInitEvent
 from ductor_bot.cli.types import CLIResponse
 from ductor_bot.config import NULLISH_TEXT_VALUES
+from ductor_bot.infra.process_tree import force_kill_process_tree
 from ductor_bot.workspace.paths import resolve_paths
 
 if TYPE_CHECKING:
@@ -179,7 +180,7 @@ class GeminiCLI(BaseCLI):
                     stdout, stderr = await process.communicate(input=prompt.encode())
             except TimeoutError:
                 logger.warning("Gemini send timed out")
-                process.kill()
+                _force_kill_process(process)
                 stdout, stderr = await process.communicate()
                 return CLIResponse(
                     result="Timeout",
@@ -404,10 +405,18 @@ async def _finish_stream_process(
 ) -> bytes:
     """Ensure process shutdown and return collected stderr."""
     if process.returncode is None:
-        with contextlib.suppress(OSError):
-            process.kill()
+        _force_kill_process(process)
     await process.wait()
     return await stderr_task
+
+
+def _force_kill_process(process: asyncio.subprocess.Process) -> None:
+    """Force-kill a subprocess and any descendants."""
+    if process.pid is not None:
+        force_kill_process_tree(process.pid)
+        return
+    with contextlib.suppress(OSError):
+        process.kill()
 
 
 def _build_stream_exit_event(

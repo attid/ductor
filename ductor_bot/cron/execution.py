@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,8 +16,14 @@ from ductor_bot.cli.codex_events import parse_codex_jsonl
 from ductor_bot.cli.gemini_events import parse_gemini_json
 from ductor_bot.cli.gemini_utils import find_gemini_cli
 from ductor_bot.cli.param_resolver import TaskExecutionConfig
+from ductor_bot.infra.process_tree import force_kill_process_tree
 
 logger = logging.getLogger(__name__)
+
+_IS_WINDOWS = sys.platform == "win32"
+
+# 0x08000000 on Windows prevents a console window from appearing.
+_CREATION_FLAGS: int = getattr(subprocess, "CREATE_NO_WINDOW", 0) if _IS_WINDOWS else 0
 
 
 @dataclass(slots=True)
@@ -39,7 +47,11 @@ def enrich_instruction(instruction: str, task_folder: str) -> str:
         f"{instruction}\n\n"
         f"IMPORTANT:\n"
         f"- Read the {memory_file} file (it contains important information!)\n"
-        f"- When finished, update {memory_file} with DATE + TIME and what you have done."
+        f"- When finished, update {memory_file} with DATE + TIME and what you have done.\n"
+        "- The final answer is delivered to Telegram automatically by ductor.\n"
+        "- Return only the user-facing result text.\n"
+        "- Do not include transport/debug/tool confirmations "
+        '(for example: "Message sent successfully").'
     )
 
 
@@ -189,6 +201,14 @@ class OneShotExecutionResult:
     timed_out: bool
 
 
+def _force_kill(proc: asyncio.subprocess.Process) -> None:
+    """Force-kill a subprocess and any descendants."""
+    if proc.pid is not None:
+        force_kill_process_tree(proc.pid)
+        return
+    proc.kill()
+
+
 async def execute_one_shot(  # noqa: PLR0913
     cmd: list[str],
     *,
@@ -205,6 +225,7 @@ async def execute_one_shot(  # noqa: PLR0913
         stdin=asyncio.subprocess.PIPE if stdin_input is not None else asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        creationflags=_CREATION_FLAGS,
     )
 
     timed_out = False
@@ -213,10 +234,10 @@ async def execute_one_shot(  # noqa: PLR0913
             stdout, stderr = await proc.communicate(input=stdin_input)
     except TimeoutError:
         timed_out = True
-        proc.kill()
+        _force_kill(proc)
         stdout, stderr = await proc.communicate()
     except asyncio.CancelledError:
-        proc.kill()
+        _force_kill(proc)
         await proc.wait()
         raise
 

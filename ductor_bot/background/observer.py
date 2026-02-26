@@ -85,16 +85,24 @@ class BackgroundObserver:
 
     async def cancel_all(self, chat_id: int) -> int:
         count = 0
+        cancelled: list[asyncio.Task[None]] = []
         for task in list(self._tasks.values()):
             if task.chat_id == chat_id and task.asyncio_task and not task.asyncio_task.done():
                 task.asyncio_task.cancel()
+                cancelled.append(task.asyncio_task)
                 count += 1
+        if cancelled:
+            await asyncio.gather(*cancelled, return_exceptions=True)
         return count
 
     async def shutdown(self) -> None:
+        cancelled: list[asyncio.Task[None]] = []
         for task in list(self._tasks.values()):
             if task.asyncio_task and not task.asyncio_task.done():
                 task.asyncio_task.cancel()
+                cancelled.append(task.asyncio_task)
+        if cancelled:
+            await asyncio.gather(*cancelled, return_exceptions=True)
         self._tasks.clear()
 
     async def _run(self, bg_task: BackgroundTask, exec_config: TaskExecutionConfig) -> None:

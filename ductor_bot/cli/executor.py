@@ -21,6 +21,7 @@ from ductor_bot.cli.base import (
 )
 from ductor_bot.cli.stream_events import ResultEvent, StreamEvent
 from ductor_bot.cli.types import CLIResponse
+from ductor_bot.infra.process_tree import force_kill_process_tree
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ async def run_streaming_subprocess(  # noqa: PLR0913
                     yield event
         stderr_bytes = await stderr_drain
     except TimeoutError:
-        process.kill()
+        _force_kill(process)
         await process.wait()
         logger.warning("%s stream timed out after %.0fs", provider_label, timeout_seconds)
         yield ResultEvent(type="result", result="", is_error=True)
@@ -170,7 +171,7 @@ async def run_oneshot_subprocess(  # noqa: PLR0913
         async with asyncio.timeout(timeout_seconds):
             stdout, stderr = await process.communicate(input=stdin_data)
     except TimeoutError:
-        process.kill()
+        _force_kill(process)
         await process.wait()
         logger.warning("%s timed out after %.0fs", provider_label, timeout_seconds)
         return CLIResponse(result="", is_error=True, timed_out=True)
@@ -197,3 +198,11 @@ async def _cancel_drain(drain: asyncio.Task[bytes]) -> None:
         drain.cancel()
         with contextlib.suppress(BaseException):
             await drain
+
+
+def _force_kill(process: asyncio.subprocess.Process) -> None:
+    """Force-kill a subprocess and its descendants."""
+    if process.pid is not None:
+        force_kill_process_tree(process.pid)
+        return
+    process.kill()

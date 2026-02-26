@@ -68,6 +68,7 @@ class CronObserver:
         self._on_result: CronResultCallback | None = None
         self._scheduled: dict[str, asyncio.Task[None]] = {}
         self._reschedule_lock = asyncio.Lock()
+        self._requested_reschedule_task: asyncio.Task[None] | None = None
         self._running = False
         self._watcher = FileWatcher(
             paths.cron_jobs_path,
@@ -89,6 +90,11 @@ class CronObserver:
         """Stop the observer: cancel all scheduled jobs and the watcher."""
         self._running = False
         await self._watcher.stop()
+        request_task = self._requested_reschedule_task
+        self._requested_reschedule_task = None
+        if request_task is not None:
+            request_task.cancel()
+            await asyncio.gather(request_task, return_exceptions=True)
         tasks = list(self._scheduled.values())
         for task in tasks:
             task.cancel()
@@ -97,12 +103,32 @@ class CronObserver:
             await asyncio.gather(*tasks, return_exceptions=True)
         logger.info("CronObserver stopped")
 
+    def request_reschedule(self) -> None:
+        """Queue a background reschedule request without blocking the caller."""
+        if not self._running:
+            return
+        task = self._requested_reschedule_task
+        if task is not None and not task.done():
+            return
+        self._requested_reschedule_task = asyncio.create_task(self._run_requested_reschedule())
+
     async def reschedule_now(self) -> None:
         """Reschedule all jobs immediately (used by interactive cron toggles)."""
         if not self._running:
             return
         await self._update_mtime()
         await self._reschedule_locked()
+
+    async def _run_requested_reschedule(self) -> None:
+        """Execute one queued reschedule request and log failures."""
+        try:
+            await self.reschedule_now()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Background cron reschedule failed")
+        finally:
+            self._requested_reschedule_task = None
 
     # -- File watcher callback --
 

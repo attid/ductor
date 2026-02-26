@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 from ductor_bot.cron.manager import CronJob
 from ductor_bot.orchestrator.core import Orchestrator
@@ -59,7 +59,7 @@ async def test_start_lists_jobs_with_keyboard(orch: Orchestrator) -> None:
 async def test_toggle_job_updates_enabled_flag(orch: Orchestrator) -> None:
     _add_job(orch, job_id="daily", title="Daily Report", enabled=True)
     observer = MagicMock()
-    observer.reschedule_now = AsyncMock()
+    observer.request_reschedule = MagicMock()
     object.__setattr__(orch, "_cron_observer", observer)
 
     _text, keyboard = await cron_selector_start(orch)
@@ -72,7 +72,7 @@ async def test_toggle_job_updates_enabled_flag(orch: Orchestrator) -> None:
     job = orch._cron_manager.get_job("daily")
     assert job is not None
     assert job.enabled is False
-    observer.reschedule_now.assert_awaited_once()
+    observer.request_reschedule.assert_called_once_with()
     assert "disabled" in text
 
 

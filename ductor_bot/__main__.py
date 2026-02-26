@@ -7,8 +7,11 @@ import json
 import logging
 import os
 import shutil
+import signal
+import stat
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -31,6 +34,51 @@ logger = logging.getLogger(__name__)
 _console = Console()
 
 _IS_WINDOWS = sys.platform == "win32"
+
+_RMTREE_RETRIES = 3
+_RMTREE_RETRY_DELAY = 1.0
+
+
+def _robust_rmtree(path: Path) -> None:
+    """Remove a directory tree, handling locked files on Windows.
+
+    On Windows, processes can hold file locks (e.g. log files). This helper:
+    1. Clears read-only flags on permission errors
+    2. Retries the full rmtree up to ``_RMTREE_RETRIES`` times with a delay
+    """
+
+    def _on_error(
+        func: Callable[..., object],
+        fpath: str,
+        _exc_info: object,
+    ) -> None:
+        """Handle permission errors by clearing read-only and retrying."""
+        try:
+            Path(fpath).chmod(stat.S_IWRITE | stat.S_IREAD)
+            func(fpath)
+        except OSError:
+            pass
+
+    last_exc: Exception | None = None
+    for attempt in range(_RMTREE_RETRIES):
+        try:
+            shutil.rmtree(path, onerror=_on_error)
+        except OSError as exc:
+            last_exc = exc
+        else:
+            return
+
+        if attempt < _RMTREE_RETRIES - 1:
+            logger.debug(
+                "rmtree attempt %d failed for %s, retrying in %.0fs",
+                attempt + 1,
+                path,
+                _RMTREE_RETRY_DELAY,
+            )
+            time.sleep(_RMTREE_RETRY_DELAY)
+
+    if last_exc:
+        logger.warning("Could not fully remove %s: %s", path, last_exc)
 
 
 def _re_exec_bot() -> NoReturn:
@@ -153,11 +201,31 @@ async def run_telegram(config: AgentConfig) -> int:
 
     bot = TelegramBot(config)
     exit_code = 0
+    loop = asyncio.get_running_loop()
+    current_task = asyncio.current_task()
+    installed_signals: list[signal.Signals] = []
+
+    def _request_shutdown() -> None:
+        if current_task is not None and not current_task.done():
+            current_task.cancel()
+
+    if current_task is not None and sys.platform != "win32":
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, _request_shutdown)
+            except (NotImplementedError, RuntimeError, ValueError):
+                continue
+            installed_signals.append(sig)
+
     try:
         exit_code = await bot.run()
+    except asyncio.CancelledError:
+        logger.info("Termination signal received, shutting down gracefully...")
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     finally:
+        for sig in installed_signals:
+            loop.remove_signal_handler(sig)
         await bot.shutdown()
         release_lock(pid_file=paths.ductor_home / "bot.pid")
     return exit_code
@@ -184,8 +252,13 @@ def _start_bot(verbose: bool = False) -> None:
         sys.exit(exit_code)
 
 
-def _stop_bot() -> None:
-    """Stop running bot instance and Docker container if active."""
+def _stop_bot(*, kill_all: bool = False) -> None:
+    """Stop running bot instance and Docker container if active.
+
+    Args:
+        kill_all: If True, also kill **all** system-wide ductor processes
+                  (not just the PID-file instance). Used during uninstall.
+    """
     from ductor_bot.infra.pidlock import _is_process_alive, _kill_and_wait
 
     paths = resolve_paths()
@@ -205,6 +278,14 @@ def _stop_bot() -> None:
             stopped = True
         else:
             pid_file.unlink(missing_ok=True)
+
+    if kill_all:
+        from ductor_bot.infra.process_tree import kill_all_ductor_processes
+
+        extra = kill_all_ductor_processes()
+        if extra:
+            _console.print(f"[dim]Killed {extra} remaining ductor process(es).[/dim]")
+            stopped = True
 
     if not stopped:
         _console.print("[dim]No running bot instance found.[/dim]")
@@ -456,8 +537,8 @@ def _uninstall() -> None:
         _console.print("\n[dim]Uninstall cancelled.[/dim]\n")
         return
 
-    # 1. Stop bot + Docker container
-    _stop_bot()
+    # 1. Stop bot + Docker container + all ductor processes
+    _stop_bot(kill_all=True)
 
     # 2. Remove Docker image
     paths = resolve_paths()
@@ -480,8 +561,14 @@ def _uninstall() -> None:
     # 3. Delete workspace
     ductor_home = paths.ductor_home
     if ductor_home.exists():
-        shutil.rmtree(ductor_home)
-        _console.print(f"[green]Deleted {ductor_home}[/green]")
+        _robust_rmtree(ductor_home)
+        if ductor_home.exists():
+            _console.print(
+                f"[yellow]Warning: Could not fully delete {ductor_home} "
+                "(some files may be locked). Remove manually.[/yellow]"
+            )
+        else:
+            _console.print(f"[green]Deleted {ductor_home}[/green]")
 
     # 4. Uninstall package
     _console.print("[dim]Uninstalling ductor package...[/dim]")

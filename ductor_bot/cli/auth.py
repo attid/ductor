@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum, unique
@@ -79,14 +80,27 @@ def format_age(dt: datetime) -> str:
 
 
 def check_claude_auth() -> AuthResult:
-    """Check Claude Code CLI auth via ``~/.claude/.credentials.json``."""
+    """Check Claude Code CLI auth via credentials file, env var, or CLI fallback."""
     claude_dir = Path.home() / ".claude"
     credentials = claude_dir / ".credentials.json"
 
+    # Fast path: credentials file (standard OAuth login).
     if credentials.is_file():
         mtime = datetime.fromtimestamp(credentials.stat().st_mtime, tz=UTC)
         result = AuthResult("claude", AuthStatus.AUTHENTICATED, credentials, mtime)
         logger.debug("Auth check provider=%s status=%s", result.provider, result.status)
+        return result
+
+    # ANTHROPIC_API_KEY environment variable.
+    if _has_nonempty_env("ANTHROPIC_API_KEY"):
+        result = AuthResult("claude", AuthStatus.AUTHENTICATED)
+        logger.debug("Auth check provider=%s status=%s (env key)", result.provider, result.status)
+        return result
+
+    # Fallback: ask the CLI itself (covers managed keys, OAuth tokens, etc.).
+    if _claude_cli_logged_in():
+        result = AuthResult("claude", AuthStatus.AUTHENTICATED)
+        logger.debug("Auth check provider=%s status=%s (cli)", result.provider, result.status)
         return result
 
     if claude_dir.is_dir():
@@ -99,19 +113,48 @@ def check_claude_auth() -> AuthResult:
     return result
 
 
+def _claude_cli_logged_in() -> bool:
+    """Run ``claude auth status`` and return True when the CLI reports logged-in."""
+    try:
+        proc = subprocess.run(
+            ["claude", "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        data = json.loads(proc.stdout)
+        return data.get("loggedIn") is True
+    except (
+        OSError,
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+    ):
+        return False
+
+
 def check_codex_auth() -> AuthResult:
-    """Check Codex CLI auth via ``$CODEX_HOME/auth.json``."""
+    """Check Codex CLI auth via ``$CODEX_HOME/auth.json``, env var, or install markers."""
     codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
     auth_file = codex_home / "auth.json"
-    version_file = codex_home / "version.json"
 
+    # Fast path: auth.json credential file.
     if auth_file.is_file():
         mtime = datetime.fromtimestamp(auth_file.stat().st_mtime, tz=UTC)
         result = AuthResult("codex", AuthStatus.AUTHENTICATED, auth_file, mtime)
         logger.debug("Auth check provider=%s status=%s", result.provider, result.status)
         return result
 
-    if version_file.is_file():
+    # OPENAI_API_KEY environment variable.
+    if _has_nonempty_env("OPENAI_API_KEY"):
+        result = AuthResult("codex", AuthStatus.AUTHENTICATED)
+        logger.debug("Auth check provider=%s status=%s (env key)", result.provider, result.status)
+        return result
+
+    # Installation indicators: version.json or config.toml.
+    if (codex_home / "version.json").is_file() or (codex_home / "config.toml").is_file():
         result = AuthResult("codex", AuthStatus.INSTALLED)
         logger.debug("Auth check provider=%s status=%s", result.provider, result.status)
         return result

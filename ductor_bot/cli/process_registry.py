@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
+
+from ductor_bot.infra.process_tree import force_kill_process_tree, terminate_process_tree
 
 logger = logging.getLogger(__name__)
 
@@ -122,15 +122,9 @@ class ProcessRegistry:
         return killed
 
 
-def _kill_process_tree(pid: int) -> None:
-    """Kill the entire process tree on Windows (cmd.exe + child node.exe)."""
-    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-        subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(pid)],
-            capture_output=True,
-            check=False,
-            timeout=5,
-        )
+def kill_process_tree(pid: int) -> None:
+    """Force-kill the entire process tree for *pid* (cross-platform)."""
+    force_kill_process_tree(pid)
 
 
 def _send_sigterm(entries: list[TrackedProcess]) -> int:
@@ -141,8 +135,8 @@ def _send_sigterm(entries: list[TrackedProcess]) -> int:
             continue
         try:
             _close_stdin(tracked.process)
-            if sys.platform == "win32" and tracked.process.pid is not None:
-                _kill_process_tree(tracked.process.pid)
+            if tracked.process.pid is not None:
+                terminate_process_tree(tracked.process.pid)
             else:
                 tracked.process.terminate()
             logger.debug("Terminate sent: pid=%s label=%s", tracked.process.pid, tracked.label)
@@ -159,8 +153,8 @@ def _send_sigkill(entries: list[TrackedProcess]) -> None:
             continue
         try:
             _close_stdin(tracked.process)
-            if sys.platform == "win32" and tracked.process.pid is not None:
-                _kill_process_tree(tracked.process.pid)
+            if tracked.process.pid is not None:
+                force_kill_process_tree(tracked.process.pid)
             else:
                 tracked.process.kill()
             logger.debug("SIGKILL sent: pid=%s label=%s", tracked.process.pid, tracked.label)
