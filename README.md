@@ -25,7 +25,7 @@
 
 ---
 
-For developers who want to use AI coding agents from their phone or any Telegram client.
+Use your Claude Max, GPT Pro, or Gemini Pro subscription with ductor. Control your coding agents via Telegram -- automations, cron jobs, named sessions, and more.
 
 ductor runs on your machine, uses your existing CLI authentication, and keeps state in plain JSON/Markdown under `~/.ductor/`.
 
