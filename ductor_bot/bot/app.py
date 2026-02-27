@@ -18,6 +18,7 @@ from aiogram.types import BotCommand, FSInputFile, ReplyParameters
 
 from ductor_bot.background import BackgroundResult
 from ductor_bot.bot.buttons import extract_buttons_for_session
+from ductor_bot.multiagent.bus import AsyncInterAgentResult
 from ductor_bot.bot.file_browser import (
     file_browser_start,
     handle_file_browser_callback,
@@ -1046,6 +1047,46 @@ class TelegramBot:
         logger.debug("Heartbeat delivery chars=%d", len(text))
         await send_rich(self._bot, chat_id, text, allowed_roots=self._file_roots(self._orch.paths))
         logger.info("Heartbeat delivered")
+
+    async def _on_async_interagent_result(
+        self,
+        result: AsyncInterAgentResult,
+    ) -> None:
+        """Handle async inter-agent result: run through orchestrator, send to Telegram.
+
+        On error: broadcasts the error directly.
+        On success: acquires the chat lock, runs through the orchestrator so the
+        agent can process the result, and sends the response to Telegram.
+        """
+        set_log_context(operation="ia-async", chat_id=0)
+
+        if not result.success:
+            error_text = (
+                f"**Inter-Agent Request Failed**\n\n"
+                f"Agent: `{result.recipient}`\n"
+                f"Error: {result.error}\n"
+                f"Request: _{result.message_preview}_"
+            )
+            roots = self._file_roots(self._orch.paths)
+            await self._broadcast(error_text, allowed_roots=roots)
+            return
+
+        chat_id = self._config.allowed_user_ids[0] if self._config.allowed_user_ids else 0
+        if not chat_id:
+            logger.warning("No chat_id available for async interagent result delivery")
+            return
+
+        lock = self._sequential.get_lock(chat_id)
+        async with lock:
+            response_text = await self._orch.handle_async_interagent_result(
+                result.result_text,
+                recipient=result.recipient,
+                task_id=result.task_id,
+            )
+
+        roots = self._file_roots(self._orch.paths)
+        if response_text:
+            await send_rich(self._bot, chat_id, response_text, allowed_roots=roots)
 
     async def _handle_webhook_wake(self, chat_id: int, prompt: str) -> str | None:
         """Process webhook wake prompt through the normal message pipeline.

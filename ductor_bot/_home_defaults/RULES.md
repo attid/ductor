@@ -38,15 +38,18 @@ You are one agent in a multi-agent system managed by a central Supervisor.
 
 ### Inter-Agent Communication
 
-Use `ask_agent.py` to send messages to other agents:
-
+**Synchronous** (blocks until response):
 ```bash
 python3 workspace/tools/agent_tools/ask_agent.py TARGET_AGENT "Your message"
 ```
 
-The target agent processes the request in a one-shot turn and returns a
-text response. See `workspace/tools/agent_tools/CLAUDE.md` for all
-agent management tools.
+**Asynchronous** (returns immediately, response delivered via Telegram):
+```bash
+python3 workspace/tools/agent_tools/ask_agent_async.py TARGET_AGENT "Your message"
+```
+
+Use async for tasks that may take longer. Use sync for quick lookups.
+See `workspace/tools/agent_tools/CLAUDE.md` for all agent management tools.
 
 ### Shared Knowledge
 

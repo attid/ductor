@@ -9,7 +9,8 @@ You are the **main agent** and can create, manage, and communicate with sub-agen
 | `create_agent.py` | Create a new sub-agent (writes to `agents.json`, auto-detected) |
 | `remove_agent.py` | Remove a sub-agent from the registry |
 | `list_agents.py` | List all sub-agents and their configuration |
-| `ask_agent.py` | Send a message to another agent and receive its response |
+| `ask_agent.py` | Send a synchronous message to another agent (blocks until response) |
+| `ask_agent_async.py` | Send an async message (returns immediately, response via Telegram) |
 | `edit_shared_knowledge.py` | View or edit SHAREDMEMORY.md (synced to all agents) |
 
 ## Creating Sub-Agents
@@ -33,15 +34,29 @@ python3 tools/agent_tools/create_agent.py \
 
 ## Inter-Agent Communication
 
-Use `ask_agent.py` to delegate tasks or ask questions to other agents.
 Each agent has its own memory, workspace, and session — they are independent.
+Two modes are available:
+
+### Synchronous (blocking)
+
+Use `ask_agent.py` for quick lookups or simple questions. Your CLI turn
+blocks until the response arrives.
 
 ```bash
-python3 tools/agent_tools/ask_agent.py "agent-name" "Your question or request here"
+python3 tools/agent_tools/ask_agent.py "agent-name" "Quick question"
 ```
 
-The response is printed to stdout. The target agent processes the message
-in a one-shot CLI turn (no session state carried over).
+### Asynchronous (fire-and-forget)
+
+Use `ask_agent_async.py` for tasks that may take longer. Returns immediately
+with a task_id. The response is delivered to your Telegram chat when ready.
+
+```bash
+python3 tools/agent_tools/ask_agent_async.py "agent-name" "Complex request that takes time"
+```
+
+Use async for code generation, analysis, research, or anything that may
+take more than a few seconds. Use sync for quick lookups.
 
 ## Shared Knowledge
 

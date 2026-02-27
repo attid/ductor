@@ -38,6 +38,7 @@ def _build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
 
     env = os.environ.copy()
     env["DUCTOR_AGENT_NAME"] = config.agent_name
+    env["DUCTOR_AGENT_ROLE"] = "main" if config.agent_name == "main" else "sub"
     env["DUCTOR_INTERAGENT_PORT"] = str(config.interagent_port)
     ductor_home = str(config.working_dir).removesuffix("/workspace")
     env["DUCTOR_HOME"] = ductor_home

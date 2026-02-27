@@ -216,7 +216,10 @@ class Orchestrator:
             await asyncio.to_thread(_docker_skill_resync, paths)
 
         await asyncio.to_thread(
-            inject_runtime_environment, paths, docker_container=docker_container
+            inject_runtime_environment,
+            paths,
+            docker_container=docker_container,
+            agent_name=agent_name,
         )
 
         orch = cls(config, paths, docker_container=docker_container, agent_name=agent_name)
@@ -893,11 +896,13 @@ class Orchestrator:
         """
         from ductor_bot.cli.types import AgentRequest
 
+        own_name = self._cli_service._config.agent_name
         prompt = (
-            f"[INTER-AGENT MESSAGE from '{sender}']\n"
+            f"[INTER-AGENT MESSAGE from '{sender}' to '{own_name}']\n"
             f"{message}\n"
             f"[END INTER-AGENT MESSAGE]\n\n"
-            f"Respond to this inter-agent request. Be direct and concise."
+            f"You are agent '{own_name}'. Respond to this inter-agent request "
+            f"from '{sender}'. Be direct and concise."
         )
 
         request = AgentRequest(
@@ -913,6 +918,47 @@ class Orchestrator:
         except Exception:
             logger.exception("Inter-agent message handling failed (from=%s)", sender)
             return f"Error processing inter-agent message from '{sender}'"
+
+    async def handle_async_interagent_result(
+        self,
+        result_text: str,
+        *,
+        recipient: str,
+        task_id: str,
+    ) -> str:
+        """Process an async inter-agent result by running a CLI turn.
+
+        Called when another agent completes an async request we sent.
+        Runs a full turn so the agent can process the result and respond
+        in its Telegram chat.
+        """
+        from ductor_bot.cli.types import AgentRequest
+
+        own_name = self._cli_service._config.agent_name
+        prompt = (
+            f"[ASYNC INTER-AGENT RESPONSE from '{recipient}' (task {task_id})]\n"
+            f"{result_text}\n"
+            f"[END ASYNC INTER-AGENT RESPONSE]\n\n"
+            f"You are agent '{own_name}'. Process this response from agent "
+            f"'{recipient}' and communicate the relevant results to the user "
+            f"in your Telegram chat."
+        )
+
+        request = AgentRequest(
+            prompt=prompt,
+            chat_id=0,
+            process_label=f"interagent-async:{recipient}",
+            timeout_seconds=self._config.cli_timeout,
+        )
+
+        try:
+            response = await self._cli_service.execute(request)
+            return response.result if response else ""
+        except Exception:
+            logger.exception(
+                "Async inter-agent result handling failed (from=%s)", recipient,
+            )
+            return f"Error processing async result from '{recipient}'"
 
     async def shutdown(self) -> None:
         """Cleanup on bot shutdown."""

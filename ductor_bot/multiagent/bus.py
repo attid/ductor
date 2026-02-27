@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -37,6 +39,35 @@ class InterAgentResponse:
     error: str | None = None
 
 
+@dataclass(slots=True)
+class AsyncInterAgentTask:
+    """Tracks an in-flight async inter-agent request."""
+
+    task_id: str
+    sender: str
+    recipient: str
+    message: str
+    timestamp: float = field(default_factory=time.time)
+    asyncio_task: asyncio.Task[None] | None = field(default=None, repr=False)
+
+
+@dataclass(slots=True)
+class AsyncInterAgentResult:
+    """Result delivered to the sender agent after async processing completes."""
+
+    task_id: str
+    sender: str
+    recipient: str
+    message_preview: str
+    result_text: str
+    success: bool = True
+    error: str | None = None
+    elapsed_seconds: float = 0.0
+
+
+AsyncResultCallback = Callable[["AsyncInterAgentResult"], Awaitable[None]]
+
+
 class InterAgentBus:
     """In-memory async bus for agent-to-agent communication.
 
@@ -47,6 +78,8 @@ class InterAgentBus:
     def __init__(self) -> None:
         self._agents: dict[str, AgentStack] = {}
         self._message_log: list[InterAgentMessage] = []
+        self._async_tasks: dict[str, AsyncInterAgentTask] = {}
+        self._async_result_handlers: dict[str, AsyncResultCallback] = {}
 
     def register(self, name: str, stack: AgentStack) -> None:
         """Register an agent on the bus."""
@@ -130,3 +163,132 @@ class InterAgentBus:
                 success=False,
                 error=f"{type(exc).__name__}: {exc}",
             )
+
+    # -- Async (fire-and-forget) communication ---------------------------------
+
+    def set_async_result_handler(
+        self, agent_name: str, handler: AsyncResultCallback,
+    ) -> None:
+        """Register callback for delivering async results back to a sender agent."""
+        self._async_result_handlers[agent_name] = handler
+
+    def send_async(
+        self,
+        sender: str,
+        recipient: str,
+        message: str,
+    ) -> str | None:
+        """Send a message to another agent asynchronously.
+
+        Returns a task_id immediately. The response will be delivered to the
+        sender agent's registered callback when the target agent finishes.
+        Returns None if the recipient is not found.
+        """
+        if recipient not in self._agents:
+            return None
+
+        task_id = secrets.token_hex(6)
+        task = AsyncInterAgentTask(
+            task_id=task_id,
+            sender=sender,
+            recipient=recipient,
+            message=message,
+        )
+        atask = asyncio.create_task(
+            self._run_async(task), name=f"ia-async:{sender}->{recipient}:{task_id}",
+        )
+        task.asyncio_task = atask
+        atask.add_done_callback(lambda _: self._async_tasks.pop(task_id, None))
+        self._async_tasks[task_id] = task
+
+        msg = InterAgentMessage(sender=sender, recipient=recipient, message=message)
+        self._message_log.append(msg)
+        if len(self._message_log) > _MAX_LOG_SIZE:
+            self._message_log = self._message_log[-_MAX_LOG_SIZE:]
+
+        logger.info(
+            "Bus async: %s -> %s task=%s (%d chars)",
+            sender, recipient, task_id, len(message),
+        )
+        return task_id
+
+    async def _run_async(self, task: AsyncInterAgentTask) -> None:
+        """Execute the async inter-agent message and deliver result to sender."""
+        t0 = time.time()
+        try:
+            target = self._agents[task.recipient]
+            orch = target.bot._orchestrator
+            if orch is None:
+                await self._deliver_async_result(AsyncInterAgentResult(
+                    task_id=task.task_id,
+                    sender=task.sender,
+                    recipient=task.recipient,
+                    message_preview=task.message[:60],
+                    result_text="",
+                    success=False,
+                    error=f"Agent '{task.recipient}' orchestrator not initialized",
+                    elapsed_seconds=time.time() - t0,
+                ))
+                return
+
+            result_text = await asyncio.wait_for(
+                orch.handle_interagent_message(task.sender, task.message),
+                timeout=_DEFAULT_TIMEOUT,
+            )
+            logger.info(
+                "Bus async: %s -> %s task=%s completed (%d chars, %.1fs)",
+                task.sender, task.recipient, task.task_id,
+                len(result_text), time.time() - t0,
+            )
+            await self._deliver_async_result(AsyncInterAgentResult(
+                task_id=task.task_id,
+                sender=task.sender,
+                recipient=task.recipient,
+                message_preview=task.message[:60],
+                result_text=result_text,
+                success=True,
+                elapsed_seconds=time.time() - t0,
+            ))
+
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Bus async: %s -> %s task=%s timed out",
+                task.sender, task.recipient, task.task_id,
+            )
+            await self._deliver_async_result(AsyncInterAgentResult(
+                task_id=task.task_id,
+                sender=task.sender,
+                recipient=task.recipient,
+                message_preview=task.message[:60],
+                result_text="",
+                success=False,
+                error=f"Timeout after {_DEFAULT_TIMEOUT:.0f}s",
+                elapsed_seconds=time.time() - t0,
+            ))
+
+        except Exception as exc:
+            logger.exception("Bus async: %s -> %s failed", task.sender, task.recipient)
+            await self._deliver_async_result(AsyncInterAgentResult(
+                task_id=task.task_id,
+                sender=task.sender,
+                recipient=task.recipient,
+                message_preview=task.message[:60],
+                result_text="",
+                success=False,
+                error=f"{type(exc).__name__}: {exc}",
+                elapsed_seconds=time.time() - t0,
+            ))
+
+    async def _deliver_async_result(self, result: AsyncInterAgentResult) -> None:
+        """Deliver an async result to the sender agent's callback handler."""
+        handler = self._async_result_handlers.get(result.sender)
+        if handler is None:
+            logger.warning(
+                "No async result handler for sender '%s' task=%s",
+                result.sender, result.task_id,
+            )
+            return
+        try:
+            await handler(result)
+        except Exception:
+            logger.exception("Error delivering async result task=%s", result.task_id)

@@ -2,8 +2,9 @@
 
 CLI subprocesses (claude, codex, gemini) run as separate OS processes and
 cannot access the in-memory bus directly. This lightweight aiohttp server
-exposes ``/interagent/send`` and ``/interagent/agents`` on localhost only,
-so tool scripts like ``ask_agent.py`` can communicate via the bus.
+exposes ``/interagent/send``, ``/interagent/send_async``, and
+``/interagent/agents`` on localhost only, so tool scripts like
+``ask_agent.py`` and ``ask_agent_async.py`` can communicate via the bus.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ class InternalAgentAPI:
         self._port = port
         self._app = web.Application()
         self._app.router.add_post("/interagent/send", self._handle_send)
+        self._app.router.add_post("/interagent/send_async", self._handle_send_async)
         self._app.router.add_get("/interagent/agents", self._handle_list)
         self._runner: web.AppRunner | None = None
 
@@ -87,6 +89,49 @@ class InternalAgentAPI:
             message=message,
         )
         return web.json_response(asdict(result))
+
+    async def _handle_send_async(self, request: web.Request) -> web.Response:
+        """POST /interagent/send_async — fire-and-forget inter-agent message.
+
+        Expects JSON body: ``{"from": "agent_name", "to": "agent_name", "message": "..."}``
+        Returns immediately: ``{"success": true/false, "task_id": "...", "error": "..."}``
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"success": False, "error": "Invalid JSON body"},
+                status=400,
+            )
+
+        sender = data.get("from", "")
+        recipient = data.get("to", "")
+        message = data.get("message", "")
+
+        if not recipient or not message:
+            return web.json_response(
+                {"success": False, "error": "Missing 'to' or 'message' field"},
+                status=400,
+            )
+
+        available = self._bus.list_agents()
+        if recipient not in available:
+            names = ", ".join(available) or "(none)"
+            return web.json_response(
+                {"success": False, "error": f"Agent '{recipient}' not found. Available: {names}"},
+            )
+
+        task_id = self._bus.send_async(
+            sender=sender,
+            recipient=recipient,
+            message=message,
+        )
+        if task_id is None:
+            return web.json_response(
+                {"success": False, "error": "Failed to create async task"},
+            )
+
+        return web.json_response({"success": True, "task_id": task_id})
 
     async def _handle_list(self, request: web.Request) -> web.Response:
         """GET /interagent/agents — list all registered agents."""

@@ -220,6 +220,12 @@ class AgentSupervisor:
             orch._supervisor = supervisor
             if stack.is_main:
                 orch.register_multiagent_commands()
+            # Wire async inter-agent result handler
+            if supervisor._bus is not None:
+                supervisor._bus.set_async_result_handler(
+                    stack.name,
+                    stack.bot._on_async_interagent_result,
+                )
             logger.debug("Supervisor reference injected into agent '%s'", stack.name)
 
         # aiogram runs startup handlers in registration order;
