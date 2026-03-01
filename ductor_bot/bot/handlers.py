@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from ductor_bot.bot.sender import SendRichOpts, send_rich
@@ -36,6 +37,42 @@ async def handle_abort(
     killed = await orchestrator.abort(chat_id)
     logger.info("Abort requested killed=%d", killed)
     text = stop_text(bool(killed), orchestrator.active_provider_name)
+    await send_rich(
+        bot,
+        chat_id,
+        text,
+        SendRichOpts(reply_to_message_id=message.message_id, thread_id=get_thread_id(message)),
+    )
+    return True
+
+
+async def handle_abort_all(
+    orchestrator: Orchestrator | None,
+    bot: Bot,
+    *,
+    chat_id: int,
+    message: Message,
+    abort_all_callback: Callable[[], Awaitable[int]] | None = None,
+) -> bool:
+    """Kill active CLI processes on THIS agent AND all other agents.
+
+    Returns True if handled, False if orchestrator not ready.
+    """
+    if orchestrator is None:
+        return False
+
+    # Kill local processes first
+    killed = await orchestrator.abort(chat_id)
+
+    # Kill processes on all other agents via the supervisor callback
+    if abort_all_callback is not None:
+        killed += await abort_all_callback()
+
+    logger.info("Abort ALL requested killed=%d", killed)
+    if killed:
+        text = f"Stopped {killed} process(es) across all agents."
+    else:
+        text = "No active processes found on any agent."
     await send_rich(
         bot,
         chat_id,

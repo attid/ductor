@@ -11,7 +11,11 @@ Named background session execution for `/session` (persistent sessions with foll
 
 Runs CLI tasks without blocking the chat flow, with persistent session support:
 
-- user sends `/session <prompt>` (optionally `/session @provider <prompt>`)
+- user sends `/session <prompt>`
+- optional directive forms:
+  - `/session @provider [model] <prompt>` (for example `@claude opus`)
+  - `/session @model <prompt>` (provider inferred)
+  - `/session @session-name <prompt>` (background follow-up to existing named session)
 - a named session is created (e.g. `swiftfox`)
 - task executes asynchronously with session tracking
 - bot sends a tagged completion/failure/cancel message when done

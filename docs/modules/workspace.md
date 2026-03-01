@@ -110,7 +110,8 @@ Recursive mtime-based sync for:
 Per directory:
 
 - pick newest existing file
-- copy to outdated existing siblings (missing siblings are not created)
+- copy to outdated existing siblings
+- missing siblings are generally not created, except task-folder backfill via `ensure_task_rule_files(...)`
 
 Background watcher: `watch_rule_files(workspace, interval=10s)`.
 
@@ -147,7 +148,7 @@ Rule file selection is based on which provider rule files exist in the parent `c
 
 Path traversal protection is enforced for create/delete operations.
 
-`sync_rule_files()` only updates already-existing rule files by mtime; it does not create new rule files in task folders.
+`sync_rule_files()` itself only updates already-existing rule files by mtime. Missing task-folder rule files are created by `ensure_task_rule_files(...)` in init and watcher cycles.
 
 ## Skill sync summary
 

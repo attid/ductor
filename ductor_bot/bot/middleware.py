@@ -20,7 +20,7 @@ from aiogram.types import (
     TelegramObject,
 )
 
-from ductor_bot.bot.abort import is_abort_message
+from ductor_bot.bot.abort import is_abort_all_message, is_abort_message
 from ductor_bot.bot.dedup import DedupeCache, build_dedup_key
 from ductor_bot.bot.topic import get_thread_id
 from ductor_bot.log_context import set_log_context
@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 
 AbortHandler = Callable[[int, "Message"], Awaitable[bool]]
 """Async callback: (chat_id, message) -> handled?"""
+
+AbortAllHandler = Callable[[int, "Message"], Awaitable[bool]]
+"""Async callback for /stop_all: (chat_id, message) -> handled?"""
 
 QuickCommandHandler = Callable[[int, "Message"], Awaitable[bool]]
 """Async callback for read-only commands that bypass the per-chat lock."""
@@ -121,6 +124,7 @@ class SequentialMiddleware(BaseMiddleware):
         self._locks: dict[int, asyncio.Lock] = {}
         self._dedup = DedupeCache()
         self._abort_handler: AbortHandler | None = None
+        self._abort_all_handler: AbortAllHandler | None = None
         self._quick_command_handler: QuickCommandHandler | None = None
         self._pending: dict[int, list[_QueueEntry]] = {}
         self._entry_counter = 0
@@ -133,6 +137,10 @@ class SequentialMiddleware(BaseMiddleware):
     def set_abort_handler(self, handler: AbortHandler) -> None:
         """Register a callback invoked for abort triggers *before* the lock."""
         self._abort_handler = handler
+
+    def set_abort_all_handler(self, handler: AbortAllHandler) -> None:
+        """Register a callback invoked for 'stop all' triggers *before* the lock."""
+        self._abort_all_handler = handler
 
     def set_quick_command_handler(self, handler: QuickCommandHandler) -> None:
         """Register a callback for read-only commands dispatched *before* the lock."""
@@ -197,6 +205,25 @@ class SequentialMiddleware(BaseMiddleware):
 
     # -- Middleware entry point ------------------------------------------------
 
+    async def _check_abort(self, chat_id: int, text: str, event: Message) -> bool:
+        """Check for abort-all and abort triggers. Returns True if handled."""
+        # Check "stop all" BEFORE "stop" — "stop all" contains "stop"
+        if self._abort_all_handler and is_abort_all_message(text):
+            logger.debug("Abort-all trigger detected text=%s", text[:40])
+            handled = await self._abort_all_handler(chat_id, event)
+            if handled:
+                await self.drain_pending(chat_id)
+                return True
+
+        if self._abort_handler and is_abort_message(text):
+            logger.debug("Abort trigger detected text=%s", text[:40])
+            handled = await self._abort_handler(chat_id, event)
+            if handled:
+                await self.drain_pending(chat_id)
+                return True
+
+        return False
+
     async def __call__(
         self,
         handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
@@ -214,12 +241,8 @@ class SequentialMiddleware(BaseMiddleware):
         chat_id = event.chat.id
         text = (event.text or "").strip()
 
-        if self._abort_handler and text and is_abort_message(text):
-            logger.debug("Abort trigger detected text=%s", text[:40])
-            handled = await self._abort_handler(chat_id, event)
-            if handled:
-                await self.drain_pending(chat_id)
-                return None
+        if text and await self._check_abort(chat_id, text, event):
+            return None
 
         if self._quick_command_handler and text and is_quick_command(text):
             logger.debug("Quick command bypass cmd=%s", text)

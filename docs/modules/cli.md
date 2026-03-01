@@ -116,7 +116,9 @@ Recovery triggers handled in orchestrator flows:
 Statuses: `AUTHENTICATED`, `INSTALLED`, `NOT_FOUND`.
 
 - Claude: `~/.claude/.credentials.json`
-- Codex: `$CODEX_HOME/auth.json` (fallback install marker: `version.json`)
+- Claude fallback paths: `ANTHROPIC_API_KEY`, then `claude auth status`
+- Codex: `$CODEX_HOME/auth.json`
+- Codex fallback paths: `OPENAI_API_KEY`; install markers: `version.json` or `config.toml`
 - Gemini:
   - CLI presence (`find_gemini_cli`)
   - OAuth creds (`~/.gemini/oauth_creds.json`)
@@ -158,7 +160,7 @@ Windows uses process-tree termination (`taskkill /F /T`) to avoid orphaned child
 - host mode (`config.docker_container == ""`): return original command + resolved local cwd
 - container mode:
   - wraps command as `docker exec ... <container> ...`,
-  - injects `DUCTOR_CHAT_ID` automatically,
+  - injects `DUCTOR_CHAT_ID`, `DUCTOR_AGENT_NAME`, `DUCTOR_INTERAGENT_PORT`, `DUCTOR_HOME`, `DUCTOR_SHARED_MEMORY_PATH`, and `DUCTOR_INTERAGENT_HOST`,
   - forwards optional env vars via `-e` flags (`extra_env`),
   - uses `-i` when `interactive=True` (required for stdin-fed providers like Gemini),
   - returns `cwd=None` (execution happens inside container context).

@@ -350,17 +350,21 @@ Interactive selector keyboards are Telegram-specific callback flows (`ms:*`, `cr
 
 Telegram-only slash commands are not specially handled by API routing. Except `/stop` (intercepted as abort), they fall through as normal model prompts.
 
+`/stop_all` is not intercepted in API transport. Use `{"type":"abort"}` (or `/stop`) for API-session aborts.
+
 ## Startup flow
 
 In `Orchestrator.create()`, after all other observers:
 
 1. Check `config.api.enabled`.
-2. Auto-generate token if empty, persist to config.
-3. Resolve default `chat_id` from `config.api.chat_id` by truthiness (`0` falls back) or first `allowed_user_ids` entry (fallback `1`).
-4. Create `ApiServer`, wire `handle_message_streaming` and `abort` as callbacks.
-5. Wire file context (`allowed_roots`, `upload_dir`, `workspace`).
-6. Start server.
-7. If no Tailscale detected and `allow_public=false`: log warning (server still starts).
+2. Import API module (`ductor_bot.api.server`).
+   - if import fails (PyNaCl missing): log warning and skip API startup.
+3. Auto-generate token if empty, persist to config.
+4. Resolve default `chat_id` from `config.api.chat_id` by truthiness (`0` falls back) or first `allowed_user_ids` entry (fallback `1`).
+5. Create `ApiServer`, wire `handle_message_streaming` and `abort` as callbacks.
+6. Wire file context (`allowed_roots`, `upload_dir`, `workspace`).
+7. Start server.
+8. If no Tailscale detected and `allow_public=false`: log warning (server still starts).
 
 ## Shutdown
 

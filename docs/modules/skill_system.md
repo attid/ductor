@@ -12,11 +12,16 @@ Cross-tool skill sync between ductor workspace and installed CLI homes.
 ## Sync directories
 
 ```text
-~/.ductor/workspace/skills/
+<agent-home>/workspace/skills/
 <-> ~/.claude/skills/
 <-> ~/.codex/skills/   (or $CODEX_HOME/skills)
 <-> ~/.gemini/skills/
 ```
+
+`<agent-home>` is:
+
+- main agent: `~/.ductor`
+- sub-agent: `~/.ductor/agents/<name>`
 
 Only existing CLI home directories are included.
 
@@ -24,7 +29,7 @@ Only existing CLI home directories are included.
 
 Bundled source: `ductor_bot/_home_defaults/workspace/skills/`.
 
-`sync_bundled_skills(paths)` mirrors bundled skills into `~/.ductor/workspace/skills/`.
+`sync_bundled_skills(paths)` mirrors bundled skills into each agent's `paths.skills_dir`.
 
 - normal mode: symlink/junction to bundled source
 - Docker mode (`docker_active=True`): managed directory copy
@@ -59,14 +64,16 @@ In link mode, existing symlinks pointing outside sync roots are treated as user-
 
 Managed roots:
 
-- `~/.ductor/workspace/skills`
+- `<agent-home>/workspace/skills`
 - bundled skills directory
 
 User-managed links/directories are preserved.
 
+In multi-agent mode, cleanup is executed per agent on orchestrator shutdown with that agent's `paths`.
+
 ## Watcher
 
-`watch_skill_sync(paths, docker_active=False, interval=30s)` runs as background task and calls `sync_skills` in worker thread.
+`watch_skill_sync(paths, docker_active=False, interval=30s)` runs as background task per agent and calls `sync_skills` in worker thread.
 
 ## Safety guarantees
 

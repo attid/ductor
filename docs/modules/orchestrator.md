@@ -22,7 +22,7 @@ Workspace precondition:
 - `~/.ductor` seeding and `init_workspace(...)` are handled upstream by `load_config()` in `__main__.py`.
 
 1. resolve paths from `ductor_home`
-2. set `DUCTOR_HOME`
+2. set process-wide `DUCTOR_HOME` only for `agent_name == "main"` (sub-agents rely on per-subprocess env)
 3. optional Docker setup (`DockerManager.setup`)
 4. if Docker active: re-sync skills in copy mode (`docker_active=True`)
 5. inject runtime environment notice into workspace rule files
@@ -33,7 +33,7 @@ Workspace precondition:
    - `CodexCacheObserver` (`codex_models.json`)
 9. construct `BackgroundObserver`, `CronObserver`, `WebhookObserver` (heartbeat/cleanup already constructed in `__init__`)
 10. start `CronObserver`, `HeartbeatObserver`, `WebhookObserver`, `CleanupObserver`
-11. if `config.api.enabled`: start `ApiServer` via `_start_api_server`
+11. if `config.api.enabled`: start `ApiServer` via `_start_api_server` (logs warning + skips startup when PyNaCl is unavailable)
 12. start rule sync watcher (`watch_rule_files`)
 13. start skill sync watcher (`watch_skill_sync`)
 14. start `ConfigReloader` (`config.json` poll every 5s)
@@ -72,7 +72,7 @@ Runtime-registered when supervisor hook is injected on main agent:
 - `/agent_stop` (and prefix form)
 - `/agent_restart` (and prefix form)
 
-`/stop` is intentionally not registered here; abort is middleware/bot-level behavior.
+`/stop` and `/stop_all` are intentionally not registered here; abort is middleware/bot-level behavior.
 
 Note:
 
@@ -94,6 +94,15 @@ Parser token rule is `@([a-zA-Z][a-zA-Z0-9_-]*)`; dotted model IDs are not parse
 Codex IDs are not included in inline directive-known set.
 
 Directive-only model messages return guidance text instead of executing.
+
+## Config hot-reload impact
+
+`_on_config_hot_reload()` updates dependent services at runtime:
+
+- refreshes `CLIServiceConfig` when hot fields include model/provider/limits/reasoning/permission/CLI args
+- refreshes known model IDs when `model` changed
+
+Observer lifecycle toggle behavior remains unchanged (`heartbeat`/`cleanup` values hot-reload, but start/stop still needs restart when initially disabled).
 
 ## Normal/streaming flow (`flows.py`)
 
@@ -208,6 +217,23 @@ This keeps wake dispatch behind the same per-chat lock as normal messages.
 6. starts aiohttp server
 
 Clients can still override session per connection via auth payload `{"type":"auth","chat_id":...}` (positive int only).
+
+If API dependencies are missing (`ImportError` on `ductor_bot.api.server`), `_start_api_server()` logs and exits without starting the server.
+
+## Inter-agent wiring
+
+Inter-agent message handling in `core.py`:
+
+- deterministic named sessions per sender: `ia-<sender>`
+- real inter-agent `chat_id`: first `allowed_user_ids` entry when available, otherwise `0` (with warning)
+- optional forced fresh session via `new_session=True`
+- provider switch auto-reset:
+  - if an existing `ia-<sender>` session provider differs from current runtime provider, the old session is ended and a fresh one is created
+  - caller receives a provider-switch notice for user delivery
+
+Persistence detail:
+
+- inter-agent session creation uses `NamedSessionRegistry.add(...)` (pre-built entry insertion), not direct internal registry mutation
 
 ## Shutdown
 

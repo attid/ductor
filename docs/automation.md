@@ -22,8 +22,11 @@ Key properties:
 - follow-up in background: `/session @session-name <message>`
 - session management: `/sessions` (list, end, end all)
 - `/stop` cancels all sessions for the chat
-- max 5 concurrent tasks, max 10 sessions per chat
+- `/stop_all` on the main agent also aborts active work across other agents (sub-agent fallback is local-only)
+- max 5 concurrent tasks, max 10 user-created sessions per chat
 - `/status` shows active background tasks
+
+Inter-agent sessions (`ia-<sender>`) use a deterministic registry path and are not created through `/session`.
 
 Status values for named-session runs: `ok`, `error:timeout`, `error:cli`, `error:internal`, `aborted`.
 
@@ -51,7 +54,8 @@ Rule-file sync behavior (all workspace directories, recursive):
 - files: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`
 - source of truth per directory: newest file by mtime
 - sync runs at init (`sync_rule_files`) and continuously (`watch_rule_files`, every 10s)
-- result: edits are propagated to older existing sibling rule files (missing siblings are not auto-created)
+- result: edits are propagated to older existing sibling rule files
+- missing siblings are generally not auto-created, except cron task folders where `ensure_task_rule_files(...)` backfills missing provider rule files
 
 Runtime behavior:
 

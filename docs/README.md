@@ -4,20 +4,21 @@ ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`)
 
 ## Onboarding (Read in This Order)
 
-1. `docs/developer_quickstart.md` -- fastest path for contributors and junior devs.
-2. `docs/modules/setup_wizard.md` -- CLI commands, onboarding flow, upgrade flow.
-3. `docs/architecture.md` -- startup, routing, streaming, callbacks, background systems.
-4. `docs/config.md` -- config schema, merge behavior, provider/model resolution.
-5. `docs/modules/config_reload.md` -- config hot-reload behavior and restart boundaries.
-6. `docs/modules/orchestrator.md` -- routing core and flow behavior.
-7. `docs/modules/bot.md` -- Telegram ingress, middleware, streaming UX, callbacks.
-8. `docs/modules/text.md` -- shared response text primitives used by bot + orchestrator.
-9. `docs/modules/api.md` -- direct WebSocket API ingress and HTTP file endpoints.
-10. `docs/modules/files.md` -- shared file parsing/storage/prompt helpers.
-11. `docs/modules/cli.md` -- provider wrappers, stream parsing, process control.
-12. `docs/modules/workspace.md` -- `~/.ductor` seeding, rule deployment/sync, runtime notices.
-13. `docs/modules/multiagent.md` -- multi-agent system, inter-agent communication, shared knowledge.
-14. Remaining module docs (`background`, `session`, `cron`, `webhook`, `heartbeat`, `cleanup`, `infra`, `supervisor`, `security`, `logging`, `skill_system`).
+1. `docs/system_overview.md` -- immediate mental model (runtime, message flow, files).
+2. `docs/developer_quickstart.md` -- fastest path for contributors and junior devs.
+3. `docs/modules/setup_wizard.md` -- CLI commands, onboarding flow, upgrade flow.
+4. `docs/architecture.md` -- startup, routing, streaming, callbacks, background systems.
+5. `docs/config.md` -- config schema, merge behavior, provider/model resolution.
+6. `docs/modules/config_reload.md` -- config hot-reload behavior and restart boundaries.
+7. `docs/modules/orchestrator.md` -- routing core and flow behavior.
+8. `docs/modules/bot.md` -- Telegram ingress, middleware, streaming UX, callbacks.
+9. `docs/modules/text.md` -- shared response text primitives used by bot + orchestrator.
+10. `docs/modules/api.md` -- direct WebSocket API ingress and HTTP file endpoints.
+11. `docs/modules/files.md` -- shared file parsing/storage/prompt helpers.
+12. `docs/modules/cli.md` -- provider wrappers, stream parsing, process control.
+13. `docs/modules/workspace.md` -- `~/.ductor` seeding, rule deployment/sync, runtime notices.
+14. `docs/modules/multiagent.md` -- multi-agent system, inter-agent communication, shared knowledge.
+15. Remaining module docs (`background`, `session`, `cron`, `webhook`, `heartbeat`, `cleanup`, `infra`, `supervisor`, `security`, `logging`, `skill_system`).
 
 ## System in 60 Seconds
 
@@ -45,6 +46,7 @@ Runtime behavior note:
 ## Documentation Index
 
 - [Architecture](architecture.md)
+- [System Overview](system_overview.md)
 - [Installation](installation.md)
 - [Automation Quickstart](automation.md)
 - [Developer Quickstart](developer_quickstart.md)

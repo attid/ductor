@@ -15,7 +15,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT = 300.0  # 5 minutes
+_DEFAULT_TIMEOUT = 300.0  # 5 minutes — for synchronous sends
+_ASYNC_TIMEOUT = 3600.0  # 1 hour — async tasks may run complex multi-step work
 _MAX_LOG_SIZE = 100  # Keep last N messages in log
 
 
@@ -47,6 +48,7 @@ class AsyncInterAgentTask:
     sender: str
     recipient: str
     message: str
+    new_session: bool = False
     timestamp: float = field(default_factory=time.time)
     asyncio_task: asyncio.Task[None] | None = field(default=None, repr=False)
 
@@ -63,6 +65,8 @@ class AsyncInterAgentResult:
     success: bool = True
     error: str | None = None
     elapsed_seconds: float = 0.0
+    session_name: str = ""
+    provider_switch_notice: str = ""
 
 
 AsyncResultCallback = Callable[["AsyncInterAgentResult"], Awaitable[None]]
@@ -102,6 +106,7 @@ class InterAgentBus:
         message: str,
         *,
         send_timeout: float = _DEFAULT_TIMEOUT,
+        new_session: bool = False,
     ) -> InterAgentResponse:
         """Send a message to another agent and wait for the response.
 
@@ -137,17 +142,21 @@ class InterAgentBus:
                     error=f"Agent '{recipient}' orchestrator not initialized",
                 )
 
-            result = await asyncio.wait_for(
-                orch.handle_interagent_message(sender, message),
+            result_text, _session_name, _notice = await asyncio.wait_for(
+                orch.handle_interagent_message(
+                    sender,
+                    message,
+                    new_session=new_session,
+                ),
                 timeout=send_timeout,
             )
             logger.info(
                 "Bus: %s -> %s completed (%d chars response)",
                 sender,
                 recipient,
-                len(result),
+                len(result_text),
             )
-            return InterAgentResponse(sender=recipient, text=result)
+            return InterAgentResponse(sender=recipient, text=result_text)
 
         except TimeoutError:
             logger.warning("Bus: %s -> %s timed out after %.0fs", sender, recipient, send_timeout)
@@ -181,12 +190,17 @@ class InterAgentBus:
         sender: str,
         recipient: str,
         message: str,
+        *,
+        new_session: bool = False,
     ) -> str | None:
         """Send a message to another agent asynchronously.
 
         Returns a task_id immediately. The response will be delivered to the
         sender agent's registered callback when the target agent finishes.
         Returns None if the recipient is not found.
+
+        If *new_session* is True, the recipient agent will end any existing
+        inter-agent session with this sender and start a fresh one.
         """
         if recipient not in self._agents:
             return None
@@ -197,6 +211,7 @@ class InterAgentBus:
             sender=sender,
             recipient=recipient,
             message=message,
+            new_session=new_session,
         )
         atask = asyncio.create_task(
             self._run_async(task),
@@ -241,15 +256,23 @@ class InterAgentBus:
                 )
                 return
 
-            result_text = await asyncio.wait_for(
-                orch.handle_interagent_message(task.sender, task.message),
-                timeout=_DEFAULT_TIMEOUT,
+            # Notify the recipient agent's Telegram chat about the incoming task
+            await self._notify_recipient(task)
+
+            result_text, session_name, provider_notice = await asyncio.wait_for(
+                orch.handle_interagent_message(
+                    task.sender,
+                    task.message,
+                    new_session=task.new_session,
+                ),
+                timeout=_ASYNC_TIMEOUT,
             )
             logger.info(
-                "Bus async: %s -> %s task=%s completed (%d chars, %.1fs)",
+                "Bus async: %s -> %s task=%s session=%s completed (%d chars, %.1fs)",
                 task.sender,
                 task.recipient,
                 task.task_id,
+                session_name,
                 len(result_text),
                 time.time() - t0,
             )
@@ -262,6 +285,8 @@ class InterAgentBus:
                     result_text=result_text,
                     success=True,
                     elapsed_seconds=time.time() - t0,
+                    session_name=session_name,
+                    provider_switch_notice=provider_notice,
                 )
             )
 
@@ -280,7 +305,7 @@ class InterAgentBus:
                     message_preview=task.message[:60],
                     result_text="",
                     success=False,
-                    error=f"Timeout after {_DEFAULT_TIMEOUT:.0f}s",
+                    error=f"Timeout after {_ASYNC_TIMEOUT:.0f}s",
                     elapsed_seconds=time.time() - t0,
                 )
             )
@@ -298,6 +323,42 @@ class InterAgentBus:
                     error=f"{type(exc).__name__}: {exc}",
                     elapsed_seconds=time.time() - t0,
                 )
+            )
+
+    async def _notify_recipient(self, task: AsyncInterAgentTask) -> None:
+        """Send a short notification to the recipient agent's Telegram chat.
+
+        This makes async task delegation visible — the recipient's user sees
+        what task was received and from whom before processing begins.
+        Best-effort: failures are logged but never block execution.
+        """
+        try:
+            target = self._agents.get(task.recipient)
+            if target is None:
+                return
+            config = target.bot._config
+            chat_id = config.allowed_user_ids[0] if config.allowed_user_ids else 0
+            if not chat_id:
+                return
+
+            # Truncate long messages for the preview
+            preview = task.message if len(task.message) <= 200 else task.message[:200] + "…"
+            session_name = f"ia-{task.sender}"
+            text = (
+                f"📥 **Async task received** from `{task.sender}`\n"
+                f"Session: `{session_name}` · Task ID: `{task.task_id}`\n\n"
+                f"_{preview}_"
+            )
+
+            from ductor_bot.bot.sender import SendRichOpts, send_rich
+
+            await send_rich(target.bot._bot, chat_id, text, SendRichOpts())
+        except Exception:
+            logger.debug(
+                "Failed to notify recipient '%s' about async task %s (non-critical)",
+                task.recipient,
+                task.task_id,
+                exc_info=True,
             )
 
     async def _deliver_async_result(self, result: AsyncInterAgentResult) -> None:

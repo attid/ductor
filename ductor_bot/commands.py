@@ -37,4 +37,5 @@ MULTIAGENT_SUB_COMMANDS: list[tuple[str, str]] = [
     ("agent_start", "Start a sub-agent"),
     ("agent_stop", "Stop a sub-agent"),
     ("agent_restart", "Restart a sub-agent"),
+    ("stop_all", "Stop all agents"),
 ]

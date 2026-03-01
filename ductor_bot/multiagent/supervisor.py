@@ -289,6 +289,7 @@ class AgentSupervisor:
             orch._supervisor = supervisor
             if stack.is_main:
                 orch.register_multiagent_commands()
+                stack.bot.set_abort_all_callback(supervisor.abort_all_agents)
                 supervisor._main_ready.set()
             logger.debug("Supervisor reference injected into agent '%s'", stack.name)
 
@@ -465,6 +466,39 @@ class AgentSupervisor:
                 await send_rich(main.bot.bot_instance, uid, f"**[Supervisor]** {message}")
         except Exception:
             logger.exception("Failed to notify main agent")
+
+    # -- Abort all ----------------------------------------------------------
+
+    async def abort_all_agents(self) -> int:
+        """Kill active CLI processes on ALL agent stacks (without stopping agents).
+
+        Called by the main bot's ``/stop_all`` handler via callback.
+        Returns total number of killed processes across all agents.
+        """
+        killed = 0
+        for name, stack in list(self._stacks.items()):
+            orch = stack.bot.orchestrator
+            if orch is None:
+                continue
+            try:
+                k = await orch._process_registry.kill_all_active()
+                if orch._bg_observer:
+                    for cid in list(orch._bg_observer._tasks):
+                        k += await orch._bg_observer.cancel_all(cid)
+                if k:
+                    logger.info("Abort-all killed %d process(es) on agent '%s'", k, name)
+                killed += k
+            except Exception:
+                logger.exception("Error aborting processes on agent '%s'", name)
+
+        # Cancel in-flight async inter-agent tasks on the bus
+        if self._bus:
+            cancelled = await self._bus.cancel_all_async()
+            if cancelled:
+                logger.info("Abort-all cancelled %d async inter-agent task(s)", cancelled)
+            killed += cancelled
+
+        return killed
 
     # -- Shutdown -----------------------------------------------------------
 

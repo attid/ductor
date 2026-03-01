@@ -13,7 +13,7 @@ pip install -e ".[dev]"
 Optional for full runtime validation:
 
 - install/auth at least one provider CLI (`claude`, `codex`, or `gemini`)
-- create Telegram bot token + user ID
+- create Telegram bot token + user ID (or run mention-only group mode via `group_mention_only=true`)
 
 ## 2) Run the bot
 
@@ -29,7 +29,11 @@ Primary runtime files/directories:
 - `~/.ductor/named_sessions.json`
 - `~/.ductor/cron_jobs.json`
 - `~/.ductor/webhooks.json`
+- `~/.ductor/SHAREDMEMORY.md`
+- `~/.ductor/agents.json`
+- `~/.ductor/agents/`
 - `~/.ductor/workspace/`
+- `~/.ductor/workspace/api_files/`
 - `~/.ductor/logs/agent.log`
 
 ## 3) Quality gates
@@ -123,6 +127,7 @@ If rules/skills drift:
 ## 7) Behavior details to remember
 
 - `/stop` is middleware-level abort handling before normal command routing.
+- `/stop_all` is middleware-level too; on the main agent it aborts active runs across all agents (sub-agent fallback is local-only).
 - `/new` resets only the active provider bucket in that chat.
 - cron/webhook `cron_task` runs support provider/model/reasoning/CLI-arg overrides.
 - direct API upload writes to `workspace/api_files/YYYY-MM-DD/`.

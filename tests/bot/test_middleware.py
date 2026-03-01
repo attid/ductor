@@ -202,6 +202,55 @@ class TestSequentialMiddleware:
         await mw(handler, msg, {})
         handler.assert_called_once()
 
+    async def test_abort_all_trigger_bypasses_lock(self) -> None:
+        from ductor_bot.bot.middleware import SequentialMiddleware
+
+        mw = SequentialMiddleware()
+        abort_all_handler = AsyncMock(return_value=True)
+        mw.set_abort_all_handler(abort_all_handler)
+
+        handler = AsyncMock()
+        msg = _make_message(chat_id=1, text="stop all")
+
+        result = await mw(handler, msg, {})
+        abort_all_handler.assert_called_once()
+        handler.assert_not_called()
+        assert result is None
+
+    async def test_abort_all_checked_before_abort(self) -> None:
+        """'stop all' should trigger abort_all, NOT single abort."""
+        from ductor_bot.bot.middleware import SequentialMiddleware
+
+        mw = SequentialMiddleware()
+        abort_handler = AsyncMock(return_value=True)
+        abort_all_handler = AsyncMock(return_value=True)
+        mw.set_abort_handler(abort_handler)
+        mw.set_abort_all_handler(abort_all_handler)
+
+        handler = AsyncMock()
+        msg = _make_message(chat_id=1, text="/stop_all")
+
+        await mw(handler, msg, {})
+        abort_all_handler.assert_called_once()
+        abort_handler.assert_not_called()
+
+    async def test_single_stop_uses_abort_not_abort_all(self) -> None:
+        """'stop' should trigger abort, NOT abort_all."""
+        from ductor_bot.bot.middleware import SequentialMiddleware
+
+        mw = SequentialMiddleware()
+        abort_handler = AsyncMock(return_value=True)
+        abort_all_handler = AsyncMock(return_value=True)
+        mw.set_abort_handler(abort_handler)
+        mw.set_abort_all_handler(abort_all_handler)
+
+        handler = AsyncMock()
+        msg = _make_message(chat_id=1, text="stop")
+
+        await mw(handler, msg, {})
+        abort_handler.assert_called_once()
+        abort_all_handler.assert_not_called()
+
     async def test_quick_command_bypasses_lock(self) -> None:
         from ductor_bot.bot.middleware import SequentialMiddleware
 

@@ -110,10 +110,15 @@ Status values:
 Behavior:
 
 - names are auto-generated adjective+noun strings (compact, no hyphen),
-- max sessions per chat: `MAX_SESSIONS_PER_CHAT = 10`,
+- max sessions per chat: `MAX_SESSIONS_PER_CHAT = 10` for user-created sessions via `create(...)`,
 - sessions persist across restarts,
 - on startup, persisted `running` sessions are downgraded to `idle`,
 - updates are persisted after each response (`update_after_response`).
+
+Additional insertion API:
+
+- `add(session)` inserts a pre-built `NamedSession` and persists immediately.
+- used by inter-agent deterministic sessions (`ia-<sender>`) where caller controls full metadata.
 
 ## Persistence
 

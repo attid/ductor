@@ -19,12 +19,13 @@ In-process multi-agent supervisor (`AgentSupervisor`) for main agent + optional 
 `AgentSupervisor.start()`:
 
 1. start `InterAgentBus`
-2. start `InternalAgentAPI` (`127.0.0.1:8799`)
+2. start `InternalAgentAPI` (`127.0.0.1:8799` in host mode, `0.0.0.0:8799` in Docker mode)
 3. create/start main `AgentStack`
-4. load + start sub-agents from `agents.json`
-5. start `SharedKnowledgeSync` (`SHAREDMEMORY.md` -> agent memories)
-6. start `agents.json` watcher
-7. wait for main agent completion and return its exit code
+4. wait up to 120s for main startup readiness (`_main_ready`) before sub-agent startup
+5. load + start sub-agents from `agents.json`
+6. start `SharedKnowledgeSync` (`SHAREDMEMORY.md` -> agent memories)
+7. start `agents.json` watcher
+8. wait for main agent completion and return its exit code
 
 ## Supervision policy
 
@@ -34,7 +35,7 @@ Each agent runs in `_supervised_run(...)` with health tracking.
 - exit code `42`:
   - sub-agent: in-process restart (stack rebuild)
   - main agent: propagate restart to process/service runtime
-- crash: exponential backoff restarts (max 5 retries), then mark `crashed`
+- crash: exponential backoff restarts (max 5 retries), then leave health as `crashed` until manual restart
 
 ## Dynamic agent registry
 
@@ -51,7 +52,23 @@ During bot startup, supervisor injects hooks into each agent dispatcher.
 
 - sets `orch._supervisor`
 - on main agent: registers multi-agent commands (`/agents`, `/agent_start`, `/agent_stop`, `/agent_restart`)
+- on main agent: wires `/stop_all` callback (`TelegramBot.set_abort_all_callback(...)`) to `AgentSupervisor.abort_all_agents()`
+
+## Cross-Agent Abort
+
+`abort_all_agents()` is the supervisor callback behind the main bot's `/stop_all` command.
+
+- iterates all agent stacks and kills active CLI processes
+- cancels chat-scoped background tasks on each stack
+- cancels in-flight async inter-agent tasks on the shared bus
+- returns aggregated kill/cancel count to the calling bot handler
 
 ## Shutdown
 
-`stop_all()` stops watcher/API/shared sync, cancels in-flight async inter-agent tasks, then stops sub-agents before main.
+`stop_all()` order:
+
+1. stop watcher/shared-knowledge sync
+2. cancel in-flight async inter-agent tasks
+3. stop sub-agents
+4. stop main agent
+5. stop internal API

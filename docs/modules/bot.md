@@ -22,7 +22,12 @@ Telegram interface layer (`aiogram`): handlers, middleware, streaming delivery, 
 
 Bot-level handlers (`app.py`):
 
-- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/restart`, `/new`, `/session`, `/sessions`
+- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/restart`, `/new`, `/session`, `/sessions`, `/agent_commands`
+- main-agent only bot handlers: `/agents`, `/agent_start`, `/agent_stop`, `/agent_restart` (routed into orchestrator command path)
+
+Command-menu note:
+
+- `/stop_all` is handled but not included in `BOT_COMMANDS` popup list (intentional "power command" behavior).
 
 Orchestrator-routed commands:
 
@@ -33,16 +38,24 @@ Orchestrator-routed commands:
 ### `AuthMiddleware`
 
 - drops message/callback updates from users outside `allowed_user_ids`
+- when `group_mention_only=true`, group/supergroup message events bypass the allowlist check (access is then gated by mention/reply checks in message resolution)
 
 ### `SequentialMiddleware`
 
 Message flow order:
 
-1. abort trigger check (`/stop` and bare abort words) before lock
+1. abort trigger check before lock:
+   - `/stop_all` or stop-all phrases (`stop all`, `stopp alle`, `alles stoppen`, `cancel all`, `abort all`)
+   - `/stop` and bare abort words
 2. quick command bypass (`/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`, `/sessions`)
 3. dedupe by `chat_id:message_id`
 4. acquire per-chat lock for normal messages
 5. queued messages get indicator + cancel button (`mq:<entry_id>`)
+
+`/stop_all` behavior detail:
+
+- main agent: local abort + supervisor callback (`abort_all_agents`) to stop active runs across all agent stacks and cancel in-flight async inter-agent tasks
+- sub-agent: callback is not wired, so it degrades to local-only abort
 
 `/model` special case in quick-command handler: when chat is busy (active process or queued messages), bot returns immediate \"agent is working\" text instead of opening the selector.
 
@@ -92,7 +105,7 @@ Handled namespaces in `TelegramBot._route_special_callback`:
 
 Lock behavior:
 
-- model selector, cron selector, session selector, and `sf!` file-request callbacks acquire per-chat lock
+- model selector, cron selector, session selector, `ns:*` follow-up callbacks, and `sf!` file-request callbacks acquire per-chat lock
 - queue cancel, upgrade callbacks, and `sf:` directory navigation do not
 
 Generic callbacks are converted to user answer text and routed through normal message flow.

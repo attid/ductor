@@ -37,7 +37,7 @@ Important runtime nuance:
 
 ## Restart-required fields
 
-- `telegram_token`, `allowed_user_ids`
+- `telegram_token`, `allowed_user_ids`, `group_mention_only`
 - `docker`, `api`, `webhooks`
 - `ductor_home`, `log_level`, `gemini_api_key`
 - restart classification is schema-based over `AgentConfig` top-level fields

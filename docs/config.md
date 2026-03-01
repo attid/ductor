@@ -56,6 +56,7 @@ API config persistence note:
 | `gemini_api_key` | `str \| None` | `None` | Config fallback key injected for Gemini API-key mode |
 | `telegram_token` | `str` | `""` | Telegram bot token |
 | `allowed_user_ids` | `list[int]` | `[]` | Telegram allowlist |
+| `group_mention_only` | `bool` | `false` | In group/supergroup chats, allow messages from any user but process only messages that explicitly mention/reply to the bot |
 | `streaming` | `StreamingConfig` | see below | Streaming tuning |
 | `docker` | `DockerConfig` | see below | Docker sidecar config |
 | `heartbeat` | `HeartbeatConfig` | see below | Background heartbeat config |
@@ -231,7 +232,7 @@ Observer lifecycle caveat:
 
 Restart-required top-level fields:
 
-- `telegram_token`, `allowed_user_ids`
+- `telegram_token`, `allowed_user_ids`, `group_mention_only`
 - `docker`, `api`, `webhooks`
 - `ductor_home`, `log_level`, `gemini_api_key`
 
@@ -368,15 +369,18 @@ Example:
 `merge_sub_agent_config(main, sub, agent_home)` builds the effective sub-agent `AgentConfig` with this priority:
 
 1. main agent config (`config.json`) as base
-2. persisted sub-agent runtime settings from `~/.ductor/agents/<name>/config/config.json` for:
-   - `provider`, `model`, `reasoning_effort`, `permission_mode`, `cli_timeout`
-3. explicit non-null overrides from `agents.json` (highest priority)
+2. explicit non-null overrides from `agents.json` (highest priority)
 
 Then it always forces:
 
 - `ductor_home = ~/.ductor/agents/<name>/`
 - `telegram_token` and `allowed_user_ids` from the sub-agent entry
 - `api.enabled = false` when no explicit `api` block is provided
+
+Notes:
+
+- there is no extra persisted runtime config layer for sub-agents in merge order
+- `/model` changes in a sub-agent chat are written back to `agents.json`, so restart/reload uses the updated values from that registry file
 
 ### `agents.json` watcher behavior
 

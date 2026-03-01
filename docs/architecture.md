@@ -5,9 +5,10 @@
 ```text
 Telegram Update
   -> aiogram Dispatcher/Router
-  -> AuthMiddleware (allowlist)
+  -> AuthMiddleware (allowlist; group/supergroup pass-through when `group_mention_only=true`)
   -> SequentialMiddleware (message updates only)
-       - exact /stop or bare abort keyword: kill active CLI process(es) + drain pending queue
+       - exact /stop_all (or stop-all phrase): kill local active CLI process(es) + optional cross-agent callback + drain pending queue
+       - exact /stop or bare abort keyword: kill active local CLI process(es) + drain pending queue
        - quick commands (/status /memory /cron /diagnose /model /showfiles /sessions): lock bypass
        - otherwise: dedupe + per-chat lock (+ queue tracking)
   -> TelegramBot handler
@@ -51,7 +52,7 @@ Multi-agent runtime core (always active; sub-agents optional):
 
 - `AgentSupervisor`: bootstraps the main agent and manages dynamic sub-agents with crash recovery.
 - `InterAgentBus`: in-memory async message passing between agents.
-- `InternalAgentAPI`: localhost HTTP bridge (`127.0.0.1:8799`) for CLI tool scripts to reach the bus.
+- `InternalAgentAPI`: HTTP bridge (`127.0.0.1:8799` on host, `0.0.0.0:8799` in Docker mode) for CLI tool scripts to reach the bus.
 - `SharedKnowledgeSync`: watches `SHAREDMEMORY.md` and injects content into all agents' `MAINMEMORY.md`.
 
 ## Startup Flow
@@ -60,7 +61,7 @@ Multi-agent runtime core (always active; sub-agents optional):
 
 Default path:
 
-1. `_is_configured()` checks token + allowed user IDs.
+1. `_is_configured()` validates `telegram_token` and access mode: either `allowed_user_ids` is non-empty or `group_mention_only=true`.
 2. If unconfigured: run onboarding wizard (`init_wizard.run_onboarding()`).
 3. If onboarding successfully installed a service, exit early.
 4. Configure logging.
@@ -85,7 +86,7 @@ Default path:
 ### `Orchestrator.create()` (`ductor_bot/orchestrator/core.py`)
 
 1. Resolve paths from `ductor_home`.
-2. Set `DUCTOR_HOME` env var.
+2. Set process-wide `DUCTOR_HOME` env var only for the main agent (sub-agents use per-subprocess env to avoid races).
 3. If Docker enabled: run `DockerManager.setup()` (includes auth mounts + optional `mount_host_cache` + `docker.mounts`) and keep recovery wiring.
 4. If Docker container is active: re-sync skills in Docker-safe copy mode.
 5. Inject runtime environment notice into workspace rule files (`inject_runtime_environment`).
@@ -95,7 +96,7 @@ Default path:
 9. Start `CodexCacheObserver` (`~/.ductor/config/codex_models.json`).
 10. Create `BackgroundObserver`, `CronObserver`, and `WebhookObserver` (cron/webhook share Codex cache).
 11. Start cron, heartbeat, webhook, cleanup observers (disabled observers no-op in `start()`).
-12. If `api.enabled=true`: start `ApiServer` (auto-generate token when empty, wire message/abort handlers and file context).
+12. If `api.enabled=true`: start `ApiServer` (auto-generate token when empty, wire message/abort handlers and file context). If PyNaCl is unavailable, startup logs a warning and skips API server startup.
 13. Start rule-sync and skill-sync watcher tasks.
 14. Start `ConfigReloader` (`config.json` poll every 5s; hot fields applied, restart-required fields logged).
 
@@ -103,9 +104,11 @@ Default path:
 
 ### Command ownership
 
-- Bot-level handlers: `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/restart`, `/new`, `/session`, `/sessions`.
+- Bot-level handlers: `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/restart`, `/new`, `/session`, `/sessions`, `/agent_commands`.
 - Orchestrator command registry: `/new`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`.
-- `/stop` is middleware/bot-local and does not route through orchestrator command dispatch.
+- Main agent also registers `/agents`, `/agent_start`, `/agent_stop`, `/agent_restart` handlers in the bot layer (routed into orchestrator via supervisor hooks).
+- `/stop` and `/stop_all` are middleware/bot-local and do not route through orchestrator command dispatch.
+- `/stop_all` uses supervisor callback wiring on the main agent to abort active work across all agent stacks (sub-agent fallback is local-only).
 - Quick-command bypass applies to `/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`, `/sessions`.
 - `/showfiles` is handled directly in bot layer.
 - `/model` bypass has busy check: when active work/queue exists, it returns immediate "agent is working" feedback.
@@ -175,7 +178,7 @@ Bot runtime path uses `bot/message_dispatch.py`:
 Per connection:
 
 1. `ws://<host>:<port>/ws` handshake.
-2. First frame must be auth JSON with token (10s timeout).
+2. First frame must be auth JSON with `type="auth"`, `token`, and `e2e_pk` (10s timeout).
    - `auth_ok` returns E2E server key plus provider metadata (`providers`) and active runtime fields when available.
 3. Session `chat_id` default is computed from `config.api.chat_id` using truthiness (`0` falls back to first `allowed_user_ids` entry, then `1`); auth payload may override with a positive int (no allowlist membership check).
 4. `message` frames run under per-`chat_id` lock and use streaming callbacks (`text_delta`, `tool_activity`, `system_status`, `result`).
@@ -206,7 +209,10 @@ Additional HTTP endpoints:
    - acquire per-chat lock,
    - route callback payload through normal message pipeline.
 
-Lock usage is path-dependent (e.g., queue cancel and upgrade callbacks are handled without acquiring the per-chat message lock).
+Lock usage is path-dependent:
+
+- queue cancel and upgrade callbacks do not acquire the per-chat message lock
+- selector/file-request callbacks and `ns:*` named-session follow-up callbacks run under the per-chat lock
 
 ## Background Systems
 
@@ -214,7 +220,8 @@ Lock usage is path-dependent (e.g., queue cancel and upgrade callbacks are handl
 
 - `TelegramBot._on_session(...)` creates a named session via `Orchestrator.submit_named_session(...)`.
 - `BackgroundObserver` enforces max 5 active tasks per chat and runs tasks asynchronously.
-- `NamedSessionRegistry` enforces max 10 named sessions per chat and persists to `~/.ductor/named_sessions.json`.
+- `NamedSessionRegistry` enforces max 10 user-created named sessions per chat (`/session`) and persists to `~/.ductor/named_sessions.json`.
+- Inter-agent sessions use deterministic names (`ia-<sender>`) and are inserted via `NamedSessionRegistry.add(...)` (separate path from user `/session` cap checks).
 - Named sessions use `CLIService.execute()` with `resume_session` for follow-up persistence.
 - Follow-ups: `@session-name <message>` (foreground streaming) or `/session @session-name <message>` (background).
 - Completion callback (`TelegramBot._on_session_result`) sends a tagged Telegram message with session name.
@@ -326,7 +333,7 @@ AgentSupervisor
   +-- AgentStack "sub-1"   (TelegramBot -> Orchestrator -> CLIService)
   +-- AgentStack "sub-2"   (TelegramBot -> Orchestrator -> CLIService)
   +-- InterAgentBus        (in-memory sync + async messaging)
-  +-- InternalAgentAPI     (127.0.0.1:8799, bridges CLI tools to bus)
+  +-- InternalAgentAPI     (127.0.0.1:8799 host / 0.0.0.0:8799 Docker, bridges CLI tools to bus)
   +-- SharedKnowledgeSync  (SHAREDMEMORY.md -> all agents' MAINMEMORY.md)
 ```
 
@@ -336,8 +343,9 @@ Each sub-agent has its own Telegram bot token, workspace, sessions, and CLI serv
 
 Inter-agent execution nuance:
 
-- sync inter-agent turns run via `Orchestrator.handle_interagent_message()` with synthetic `chat_id=0`
+- sync inter-agent turns run via `Orchestrator.handle_interagent_message()` with `chat_id=allowed_user_ids[0]` when available, otherwise `0` (with warning)
 - async inter-agent result delivery is routed to the agent's first allowed user ID
+- provider changes during inter-agent conversations auto-end the old `ia-<sender>` session and start a fresh one, with a user-facing notice
 
 Detailed behavior: `docs/modules/multiagent.md`.
 

@@ -482,3 +482,66 @@ class TestHandleRestartExit:
             await supervisor._handle_restart_exit("sub1", stack, health)
 
         assert call_order == ["shutdown", "rebuild"]
+
+
+class TestAbortAllAgents:
+    """Test abort_all_agents() kills processes on every stack."""
+
+    async def test_kills_across_all_stacks(self, supervisor: AgentSupervisor) -> None:
+        """abort_all_agents kills processes on main + sub-agents."""
+        main_registry = MagicMock()
+        main_registry.kill_all_active = AsyncMock(return_value=2)
+        main_orch = MagicMock()
+        main_orch._process_registry = main_registry
+        main_orch._bg_observer = None
+        main_bot = MagicMock()
+        main_bot.orchestrator = main_orch
+        main_stack = MagicMock()
+        main_stack.bot = main_bot
+
+        sub_registry = MagicMock()
+        sub_registry.kill_all_active = AsyncMock(return_value=1)
+        sub_orch = MagicMock()
+        sub_orch._process_registry = sub_registry
+        sub_orch._bg_observer = None
+        sub_bot = MagicMock()
+        sub_bot.orchestrator = sub_orch
+        sub_stack = MagicMock()
+        sub_stack.bot = sub_bot
+
+        supervisor._stacks = {"main": main_stack, "sub1": sub_stack}
+
+        from ductor_bot.multiagent.bus import InterAgentBus
+
+        supervisor._bus = InterAgentBus()
+
+        killed = await supervisor.abort_all_agents()
+        assert killed == 3
+        main_registry.kill_all_active.assert_called_once()
+        sub_registry.kill_all_active.assert_called_once()
+
+    async def test_no_stacks_returns_zero(self, supervisor: AgentSupervisor) -> None:
+        killed = await supervisor.abort_all_agents()
+        assert killed == 0
+
+    async def test_none_orchestrator_skipped(self, supervisor: AgentSupervisor) -> None:
+        """Stacks with None orchestrator are safely skipped."""
+        bot = MagicMock()
+        bot.orchestrator = None
+        stack = MagicMock()
+        stack.bot = bot
+        supervisor._stacks = {"main": stack}
+
+        killed = await supervisor.abort_all_agents()
+        assert killed == 0
+
+    async def test_includes_bus_cancel(self, supervisor: AgentSupervisor) -> None:
+        """Bus async tasks are also cancelled."""
+        from ductor_bot.multiagent.bus import InterAgentBus
+
+        supervisor._bus = InterAgentBus()
+        supervisor._bus.cancel_all_async = AsyncMock(return_value=2)
+
+        killed = await supervisor.abort_all_agents()
+        assert killed == 2
+        supervisor._bus.cancel_all_async.assert_called_once()

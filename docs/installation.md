@@ -9,7 +9,7 @@
    - Codex CLI: `npm install -g @openai/codex && codex auth`
    - Gemini CLI: `npm install -g @google/gemini-cli` and authenticate in `gemini`
 4. Telegram bot token from [@BotFather](https://t.me/BotFather)
-5. Telegram user ID from [@userinfobot](https://t.me/userinfobot)
+5. Telegram user ID from [@userinfobot](https://t.me/userinfobot) (or `group_mention_only=true` mode if you only run in mention-gated group chats)
 6. Docker optional (recommended for sandboxing)
 
 ## Install
@@ -151,6 +151,16 @@ ductor api enable
 
 This writes/updates the `api` block in `config.json` and generates a token if missing.
 
+`ductor api enable` requires PyNaCl (used for E2E encryption). If it is missing:
+
+```bash
+# pipx install
+pipx inject ductor PyNaCl
+
+# pip install
+pip install "ductor[api]"
+```
+
 Manual config equivalent:
 
 ```json
@@ -168,6 +178,7 @@ Manual config equivalent:
 Notes:
 
 - token is generated and persisted by `ductor api enable` (runtime also generates it on API start if still empty).
+- WebSocket auth frame must include `type="auth"`, `token`, and `e2e_pk` (client ephemeral public key).
 - endpoints:
   - WebSocket: `ws://<host>:8741/ws`
   - health: `GET /health`

@@ -60,6 +60,64 @@ class TestHandleAbort:
         assert result is False
 
 
+class TestHandleAbortAll:
+    """Test abort-all handling logic."""
+
+    async def test_abort_all_kills_local_and_callback(self) -> None:
+        from ductor_bot.bot.handlers import handle_abort_all
+
+        orchestrator = MagicMock()
+        orchestrator.abort = AsyncMock(return_value=2)
+        callback = AsyncMock(return_value=3)
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+
+        msg = _make_message(chat_id=42)
+        result = await handle_abort_all(
+            orchestrator, bot, chat_id=42, message=msg, abort_all_callback=callback,
+        )
+        assert result is True
+        orchestrator.abort.assert_called_once_with(42)
+        callback.assert_called_once()
+
+    async def test_abort_all_no_callback(self) -> None:
+        from ductor_bot.bot.handlers import handle_abort_all
+
+        orchestrator = MagicMock()
+        orchestrator.abort = AsyncMock(return_value=1)
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+
+        msg = _make_message(chat_id=42)
+        result = await handle_abort_all(
+            orchestrator, bot, chat_id=42, message=msg, abort_all_callback=None,
+        )
+        assert result is True
+        orchestrator.abort.assert_called_once_with(42)
+
+    async def test_abort_all_no_orchestrator(self) -> None:
+        from ductor_bot.bot.handlers import handle_abort_all
+
+        msg = _make_message()
+        result = await handle_abort_all(None, MagicMock(), chat_id=1, message=msg)
+        assert result is False
+
+    async def test_abort_all_zero_killed(self) -> None:
+        from ductor_bot.bot.handlers import handle_abort_all
+
+        orchestrator = MagicMock()
+        orchestrator.abort = AsyncMock(return_value=0)
+        callback = AsyncMock(return_value=0)
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+
+        msg = _make_message(chat_id=42)
+        result = await handle_abort_all(
+            orchestrator, bot, chat_id=42, message=msg, abort_all_callback=callback,
+        )
+        assert result is True
+
+
 class TestHandleCommand:
     """Test orchestrator command dispatching."""
 

@@ -23,6 +23,7 @@ Covers `ductor` CLI command behavior, onboarding wizard, and upgrade/restart/uni
 - `ductor service <install|status|start|stop|logs|uninstall>`: service control
 - `ductor docker <rebuild|enable|disable|mount|unmount|mounts>`: Docker lifecycle + config + mount management
 - `ductor api <enable|disable>`: API server config toggle (beta)
+- `ductor agents <list|add|remove>`: sub-agent registry management
 - `ductor help`: command table + status hint
 
 Command resolution in `main()` takes the first matching non-flag command token.
@@ -81,7 +82,7 @@ If already configured and onboarding/reset is requested:
 `_is_configured()` requires:
 
 - valid non-placeholder `telegram_token`
-- non-empty `allowed_user_ids`
+- and either non-empty `allowed_user_ids` or `group_mention_only=true`
 
 ## Status panel (`ductor status`)
 
@@ -92,6 +93,7 @@ Shows:
 - Docker enabled state
 - error count from newest `ductor*.log`
 - key paths (home/config/workspace/logs/sessions)
+- when sub-agents are configured and main bot is running: live per-agent health table from internal API (`running|starting|crashed|stopped`, uptime, restart count)
 
 Note: runtime file logger writes `agent.log`; status counter still scans `ductor*.log`.
 

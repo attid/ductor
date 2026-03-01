@@ -7,7 +7,7 @@ Multi-agent system: run multiple independent ductor agents in a single process w
 - `supervisor.py`: `AgentSupervisor` lifecycle, crash recovery, `agents.json` watcher, sub-agent start/stop
 - `stack.py`: `AgentStack` container (workspace + TelegramBot + config per agent)
 - `bus.py`: `InterAgentBus` in-memory message passing (sync + async)
-- `internal_api.py`: `InternalAgentAPI` localhost HTTP bridge for CLI tool scripts
+- `internal_api.py`: `InternalAgentAPI` host-local HTTP bridge for CLI tool scripts (`127.0.0.1` on host, `0.0.0.0` in Docker mode)
 - `models.py`: `SubAgentConfig`, `merge_sub_agent_config`
 - `registry.py`: `AgentRegistry` read/write access to `agents.json`
 - `health.py`: `AgentHealth` runtime health tracking per agent
@@ -41,7 +41,7 @@ AgentSupervisor
   +-- InterAgentBus (in-memory)
   |     sync send() + async send_async()
   |
-  +-- InternalAgentAPI (127.0.0.1:8799)
+  +-- InternalAgentAPI (127.0.0.1:8799 host / 0.0.0.0:8799 Docker)
   |     /interagent/send, /interagent/send_async, /interagent/agents, /interagent/health
   |
   +-- SharedKnowledgeSync
@@ -169,9 +169,15 @@ Removing a sub-agent stops its Telegram bot but preserves its workspace under `~
 
 In-memory message bus. All agents in the same process register on it. Messages are handled by calling the target agent's `Orchestrator.handle_interagent_message()`, which runs a one-shot CLI turn.
 
+Provider-switch behavior in inter-agent sessions:
+
+- deterministic recipient session name is `ia-<sender>`
+- if recipient provider changed since that session was created, the old session is ended and recreated automatically
+- async result payload includes a `provider_switch_notice`, and the sender-side Telegram handler surfaces that notice before processing the result
+
 ### Tool scripts
 
-CLI subprocesses cannot access the in-memory bus directly. Tool scripts use the `InternalAgentAPI` (localhost HTTP on port 8799) as a bridge.
+CLI subprocesses cannot access the in-memory bus directly. Tool scripts use the `InternalAgentAPI` bridge on port `8799` (`127.0.0.1` host bind, `0.0.0.0` in Docker mode).
 
 Environment variables set by the framework:
 
@@ -180,6 +186,7 @@ Environment variables set by the framework:
 | `DUCTOR_AGENT_NAME` | Current agent's name |
 | `DUCTOR_INTERAGENT_PORT` | Internal API port (default `8799`) |
 | `DUCTOR_INTERAGENT_HOST` | Internal API host (`host.docker.internal` in Docker exec, otherwise tool scripts default to `127.0.0.1`) |
+| `DUCTOR_SHARED_MEMORY_PATH` | Absolute path to shared memory file (`SHAREDMEMORY.md`) |
 
 #### Synchronous (`ask_agent.py`)
 
@@ -187,13 +194,15 @@ Blocks until the target agent responds. Use for quick lookups.
 
 ```bash
 python3 tools/agent_tools/ask_agent.py TARGET_AGENT "Your question"
+python3 tools/agent_tools/ask_agent.py TARGET_AGENT "Your question" --new
 ```
 
 The sender's CLI turn blocks for up to 5 minutes (bus timeout).
 
 Execution note:
 
-- synchronous inter-agent turns run through `Orchestrator.handle_interagent_message()` with synthetic `chat_id=0` (not user-chat scoped).
+- synchronous inter-agent turns run through `Orchestrator.handle_interagent_message()` with `chat_id=allowed_user_ids[0]` when available, otherwise `0` (not synthetic-only).
+- `--new` forces a fresh `ia-<sender>` session on the recipient (existing session ended first).
 
 #### Asynchronous (`ask_agent_async.py`)
 
@@ -201,9 +210,15 @@ Returns immediately with a `task_id`. The response is delivered to the sender ag
 
 ```bash
 python3 tools/agent_tools/ask_agent_async.py TARGET_AGENT "Complex task"
+python3 tools/agent_tools/ask_agent_async.py TARGET_AGENT "Complex task" --new
 ```
 
 Use async for anything that may take more than a few seconds.
+
+Async visibility behavior:
+
+- recipient agent's primary Telegram user gets an immediate "async task received" preview
+- sender agent's primary Telegram user gets the final result when processing completes
 
 #### Shared knowledge (`edit_shared_knowledge.py`)
 
@@ -281,7 +296,7 @@ When the bot is running, `ductor agents list` queries live health from the inter
 `_supervised_run()` wraps each agent with automatic crash recovery:
 
 - On crash: exponential backoff retry (5s, 10s, 20s, 40s, 80s), max 5 retries.
-- After max retries: agent is stopped and the main agent is notified via Telegram.
+- After max retries: supervise loop gives up, health stays `crashed` (until manual restart), and the main agent is notified via Telegram.
 - On restart request (exit code 42):
   - Main agent: full service restart (propagated to supervisor).
   - Sub-agent: in-process hot-reload (rebuild stack only, no service restart).
@@ -313,7 +328,7 @@ Logging stays centralized in the main home at `~/.ductor/logs/agent.log`.
 
 ## InternalAgentAPI
 
-Localhost-only HTTP server on `127.0.0.1:8799`. Bridges CLI subprocesses to the InterAgentBus.
+HTTP server on port `8799`: binds `127.0.0.1` in host mode and `0.0.0.0` in Docker mode. Bridges CLI subprocesses to the InterAgentBus.
 
 Startup behavior:
 
@@ -329,7 +344,7 @@ Startup behavior:
 ### POST `/interagent/send`
 
 ```json
-{"from": "agent_name", "to": "target_agent", "message": "..."}
+{"from": "agent_name", "to": "target_agent", "message": "...", "new_session": false}
 ```
 
 Response: `{"sender": "...", "text": "...", "success": true, "error": null}`
@@ -337,6 +352,8 @@ Response: `{"sender": "...", "text": "...", "success": true, "error": null}`
 ### POST `/interagent/send_async`
 
 Same request body. Response: `{"success": true, "task_id": "abc123"}`
+
+`new_session: true` can be provided in sync/async requests to force a fresh recipient inter-agent session (`ia-<sender>` reset).
 
 The result is delivered to the sender agent's primary Telegram user (`allowed_user_ids[0]`) when the target finishes processing.
 
@@ -348,6 +365,7 @@ The result is delivered to the sender agent's primary Telegram user (`allowed_us
 
 1. Sets `orch._supervisor` reference.
 2. On the main agent: registers multi-agent commands (`/agents`, `/agent_start`, `/agent_stop`, `/agent_restart`).
+3. On the main agent: wires `/stop_all` callback to `AgentSupervisor.abort_all_agents()` so one command can abort active work across all agents.
 
 ### agents.json watcher
 

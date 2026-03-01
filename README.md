@@ -43,7 +43,7 @@ ductor
 
 The onboarding wizard handles CLI checks, Telegram setup, timezone, optional Docker, and optional background service install.
 
-**Requirements:** Python 3.11+, at least one CLI installed (`claude`, `codex`, or `gemini`), a Telegram Bot Token from [@BotFather](https://t.me/BotFather).
+**Requirements:** Python 3.11+, at least one CLI installed (`claude`, `codex`, or `gemini`), a Telegram Bot Token from [@BotFather](https://t.me/BotFather), and either at least one Telegram user ID in `allowed_user_ids` or `group_mention_only=true`.
 
 Detailed setup: [`docs/installation.md`](docs/installation.md)
 
@@ -175,6 +175,7 @@ Session behavior:
 | `/model` | Interactive model/provider selector |
 | `/new` | Reset active provider session |
 | `/stop` | Abort active run |
+| `/stop_all` | Abort active runs across all agents (main agent; local fallback on sub-agents) |
 | `/status` | Session/provider/auth status |
 | `/memory` | Show persistent memory |
 | `/cron` | Interactive cron management |
@@ -203,6 +204,7 @@ ductor docker mount /path  # Add host mount
 
 ductor agents list      # List configured sub-agents
 ductor agents add NAME  # Add a sub-agent
+ductor agents remove NAME  # Remove a sub-agent
 
 ductor api enable       # Enable WebSocket API (beta)
 ```
@@ -218,14 +220,16 @@ Full CLI reference: [`docs/modules/setup_wizard.md`](docs/modules/setup_wizard.m
   named_sessions.json       # Named background sessions
   cron_jobs.json            # Scheduled tasks
   webhooks.json             # Webhook definitions
-  agents.json                 # Sub-agent registry (optional)
-  agents/                     # Sub-agent workspaces
+  SHAREDMEMORY.md           # Shared knowledge across all agents
+  agents.json               # Sub-agent registry (optional)
+  agents/                   # Sub-agent homes/workspaces
   CLAUDE.md / AGENTS.md / GEMINI.md  # Rule files
   logs/agent.log
   workspace/
     memory_system/MAINMEMORY.md      # Persistent memory
     cron_tasks/ skills/ tools/       # Task scripts, skills, tool scripts
     telegram_files/ output_to_user/  # File I/O directories
+    api_files/                       # API uploads (dated folders)
 ```
 
 Full config reference: [`docs/config.md`](docs/config.md)
@@ -234,6 +238,7 @@ Full config reference: [`docs/config.md`](docs/config.md)
 
 | Doc | Content |
 |---|---|
+| [System Overview](docs/system_overview.md) | Fastest end-to-end runtime understanding |
 | [Developer Quickstart](docs/developer_quickstart.md) | Fastest path for contributors |
 | [Architecture](docs/architecture.md) | Startup, routing, streaming, callbacks |
 | [Configuration](docs/config.md) | Config schema and merge behavior |
