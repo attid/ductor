@@ -22,7 +22,7 @@ from aiogram.types import (
 
 from ductor_bot.bot.abort import is_abort_all_message, is_abort_message
 from ductor_bot.bot.dedup import DedupeCache, build_dedup_key
-from ductor_bot.bot.topic import get_thread_id
+from ductor_bot.bot.topic import get_session_key, get_thread_id
 from ductor_bot.log_context import set_log_context
 
 if TYPE_CHECKING:
@@ -121,7 +121,7 @@ class SequentialMiddleware(BaseMiddleware):
     """
 
     def __init__(self) -> None:
-        self._locks: dict[int, asyncio.Lock] = {}
+        self._locks: dict[tuple[int, int | None], asyncio.Lock] = {}
         self._dedup = DedupeCache()
         self._abort_handler: AbortHandler | None = None
         self._abort_all_handler: AbortAllHandler | None = None
@@ -146,20 +146,24 @@ class SequentialMiddleware(BaseMiddleware):
         """Register a callback for read-only commands dispatched *before* the lock."""
         self._quick_command_handler = handler
 
-    def get_lock(self, chat_id: int) -> asyncio.Lock:
-        """Return the per-chat lock, creating it if needed.
+    def get_lock(self, lock_key: tuple[int, int | None] | int) -> asyncio.Lock:
+        """Return the per-session lock, creating it if needed.
+
+        Accepts either a ``(chat_id, topic_id)`` tuple (from
+        ``SessionKey.lock_key``) or a plain ``chat_id`` integer for
+        backward compatibility.
 
         Used by webhook wake dispatch to queue behind active conversations.
         """
-        if chat_id not in self._locks:
+        key: tuple[int, int | None] = lock_key if isinstance(lock_key, tuple) else (lock_key, None)
+        if key not in self._locks:
             if len(self._locks) >= _MAX_LOCKS:
                 idle = [k for k, v in self._locks.items() if not v.locked()]
-                # Always remove at least one idle lock so the dict stays bounded.
                 to_remove = max(1, len(idle) // 2) if idle else 0
                 for k in idle[:to_remove]:
                     del self._locks[k]
-            self._locks[chat_id] = asyncio.Lock()
-        return self._locks[chat_id]
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
 
     # -- Queue inspection & manipulation ---------------------------------------
 
@@ -168,10 +172,13 @@ class SequentialMiddleware(BaseMiddleware):
         return bool(self._pending.get(chat_id))
 
     def is_busy(self, chat_id: int) -> bool:
-        """Return True if *chat_id* has the lock held or pending messages."""
-        lock = self._locks.get(chat_id)
-        if lock and lock.locked():
-            return True
+        """Return True if *chat_id* has any lock held or pending messages.
+
+        Checks all topic-scoped locks for the given chat.
+        """
+        for (cid, _tid), lock in self._locks.items():
+            if cid == chat_id and lock.locked():
+                return True
         return self.has_pending(chat_id)
 
     async def cancel_entry(self, chat_id: int, entry_id: int) -> bool:
@@ -250,12 +257,13 @@ class SequentialMiddleware(BaseMiddleware):
             if handled:
                 return None
 
-        key = build_dedup_key(chat_id, event.message_id)
-        if self._dedup.check(key):
+        dedup_key = build_dedup_key(chat_id, event.message_id)
+        if self._dedup.check(dedup_key):
             logger.debug("Message deduplicated msg_id=%d", event.message_id)
             return None
 
-        lock = self.get_lock(chat_id)
+        session_key = get_session_key(event)
+        lock = self.get_lock(session_key.lock_key)
         entry: _QueueEntry | None = None
 
         if lock.locked():

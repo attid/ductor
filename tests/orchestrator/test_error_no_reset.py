@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 from ductor_bot.cli.types import AgentResponse
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.orchestrator.flows import normal, normal_streaming
+from ductor_bot.session.key import SessionKey
 
 
 def _mock_response(**kwargs: Any) -> AgentResponse:
@@ -26,7 +27,7 @@ async def _establish_session(orch: Orchestrator, sid: str = "sess-keep") -> None
     object.__setattr__(
         orch._cli_service, "execute", AsyncMock(return_value=_mock_response(session_id=sid))
     )
-    await normal(orch, 1, "Setup")
+    await normal(orch, SessionKey(chat_id=1), "Setup")
 
 
 async def test_error_preserves_session_id(orch: Orchestrator) -> None:
@@ -41,10 +42,10 @@ async def test_error_preserves_session_id(orch: Orchestrator) -> None:
     )
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    result = await normal(orch, 1, "Fail once")
+    result = await normal(orch, SessionKey(chat_id=1), "Fail once")
 
     assert "Session Error" in result.text
-    session = await orch._sessions.get_active(1)
+    session = await orch._sessions.get_active(SessionKey(chat_id=1))
     assert session is not None
     assert session.session_id == "sess-keep"
     assert session.message_count == 1
@@ -58,7 +59,7 @@ async def test_error_message_contains_new_hint(orch: Orchestrator) -> None:
     )
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    result = await normal(orch, 1, "Broken")
+    result = await normal(orch, SessionKey(chat_id=1), "Broken")
 
     assert "Your session has been preserved" in result.text
     assert "Use /new" in result.text
@@ -71,7 +72,7 @@ async def test_no_auto_retry_on_resume_failure(orch: Orchestrator) -> None:
     object.__setattr__(orch._cli_service, "execute", mock_execute)
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    await normal(orch, 1, "Retry")
+    await normal(orch, SessionKey(chat_id=1), "Retry")
 
     assert mock_execute.call_count == 1
     request = mock_execute.call_args[0][0]
@@ -87,15 +88,15 @@ async def test_next_message_after_error_resumes_same_session(orch: Orchestrator)
     object.__setattr__(orch._cli_service, "execute", mock_execute)
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    first = await normal(orch, 1, "Flaky")
-    second = await normal(orch, 1, "Try again")
+    first = await normal(orch, SessionKey(chat_id=1), "Flaky")
+    second = await normal(orch, SessionKey(chat_id=1), "Try again")
 
     assert "Session Error" in first.text
     assert second.text == "Recovered"
     second_request = mock_execute.call_args_list[1][0][0]
     assert second_request.resume_session == "sess-keep"
 
-    session = await orch._sessions.get_active(1)
+    session = await orch._sessions.get_active(SessionKey(chat_id=1))
     assert session is not None
     assert session.session_id == "sess-keep"
     assert session.message_count == 2
@@ -111,17 +112,21 @@ async def test_sigkill_still_auto_recovers(orch: Orchestrator) -> None:
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset_provider)
 
-    result = await normal(orch, 1, "Run")
+    result = await normal(orch, SessionKey(chat_id=1), "Run")
 
     assert result.text == "Recovered"
     assert mock_execute.call_count == 2
-    mock_reset_provider.assert_called_once_with(1, provider="claude", model="opus")
+    mock_reset_provider.assert_called_once_with(
+        SessionKey(chat_id=1), provider="claude", model="opus"
+    )
 
 
 async def test_sigkill_resets_only_affected_provider(orch: Orchestrator) -> None:
     await _establish_session(orch, sid="claude-sid")
 
-    codex, _ = await orch._sessions.resolve_session(1, provider="codex", model="gpt-5.2-codex")
+    codex, _ = await orch._sessions.resolve_session(
+        SessionKey(chat_id=1), provider="codex", model="gpt-5.2-codex"
+    )
     codex.session_id = "codex-sid"
     await orch._sessions.update_session(codex)
 
@@ -131,10 +136,10 @@ async def test_sigkill_resets_only_affected_provider(orch: Orchestrator) -> None
     )
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    result = await normal(orch, 1, "Run")
+    result = await normal(orch, SessionKey(chat_id=1), "Run")
 
     assert "Execution was interrupted" in result.text
-    session = await orch._sessions.get_active(1)
+    session = await orch._sessions.get_active(SessionKey(chat_id=1))
     assert session is not None
     assert session.provider == "claude"
     assert session.session_id == ""
@@ -149,12 +154,12 @@ async def test_streaming_error_preserves_session(orch: Orchestrator) -> None:
     object.__setattr__(orch._cli_service, "execute_streaming", mock_streaming)
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    result = await normal_streaming(orch, 1, "Broken stream")
+    result = await normal_streaming(orch, SessionKey(chat_id=1), "Broken stream")
 
     assert "Session Error" in result.text
     assert mock_streaming.call_count == 1
 
-    session = await orch._sessions.get_active(1)
+    session = await orch._sessions.get_active(SessionKey(chat_id=1))
     assert session is not None
     assert session.session_id == "sess-keep"
 
@@ -166,7 +171,7 @@ async def test_streaming_no_auto_retry_on_resume_failure(orch: Orchestrator) -> 
     object.__setattr__(orch._cli_service, "execute_streaming", mock_streaming)
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    await normal_streaming(orch, 1, "Retry")
+    await normal_streaming(orch, SessionKey(chat_id=1), "Retry")
 
     assert mock_streaming.call_count == 1
     request = mock_streaming.call_args[0][0]
@@ -185,7 +190,7 @@ async def test_auth_error_shows_hint(orch: Orchestrator) -> None:
     )
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    result = await normal(orch, 1, "Test")
+    result = await normal(orch, SessionKey(chat_id=1), "Test")
 
     assert "Session Error" in result.text
     assert "Authentication failed" in result.text
@@ -201,7 +206,7 @@ async def test_rate_limit_error_shows_hint(orch: Orchestrator) -> None:
     )
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    result = await normal(orch, 1, "Test")
+    result = await normal(orch, SessionKey(chat_id=1), "Test")
 
     assert "Rate limit" in result.text
 
@@ -215,7 +220,7 @@ async def test_unknown_error_shows_detail_line(orch: Orchestrator) -> None:
     )
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    result = await normal(orch, 1, "Test")
+    result = await normal(orch, SessionKey(chat_id=1), "Test")
 
     assert "Something unexpected happened" in result.text
     assert "Second line" not in result.text
@@ -229,6 +234,6 @@ async def test_streaming_auth_error_shows_hint(orch: Orchestrator) -> None:
     object.__setattr__(orch._cli_service, "execute_streaming", mock_streaming)
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
 
-    result = await normal_streaming(orch, 1, "Test")
+    result = await normal_streaming(orch, SessionKey(chat_id=1), "Test")
 
     assert "Authentication failed" in result.text

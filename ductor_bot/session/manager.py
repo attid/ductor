@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ductor_bot.config import AgentConfig, resolve_user_timezone
 from ductor_bot.infra.json_store import atomic_json_save, load_json
+from ductor_bot.session.key import SessionKey
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ class SessionData:
     """Active session state with provider-isolated IDs and metrics."""
 
     chat_id: int
+    topic_id: int | None
     provider: str
     model: str
     created_at: str
@@ -96,6 +98,7 @@ class SessionData:
 
     def __init__(self, chat_id: int, **raw: object) -> None:
         """Create session data from current or legacy serialized fields."""
+        topic_id = _as_optional_int(raw.pop("topic_id", None))
         provider = _as_str(raw.pop("provider", "claude"), default="claude")
         model = _as_str(raw.pop("model", "opus"), default="opus")
         created_at = _as_str(raw.pop("created_at", ""), default="")
@@ -109,6 +112,7 @@ class SessionData:
         total_tokens = _as_optional_int(raw.pop("total_tokens", None))
 
         self.chat_id = chat_id
+        self.topic_id = topic_id
         self.provider = provider
         self.model = model
 
@@ -131,6 +135,11 @@ class SessionData:
 
         if raw:
             logger.warning("SessionData: unknown keys ignored: %s", list(raw.keys()))
+
+    @property
+    def session_key(self) -> SessionKey:
+        """Composite key for this session."""
+        return SessionKey(chat_id=self.chat_id, topic_id=self.topic_id)
 
     @property
     def session_id(self) -> str:
@@ -249,7 +258,7 @@ class SessionManager:
 
     async def resolve_session(
         self,
-        chat_id: int,
+        key: SessionKey,
         *,
         provider: str | None = None,
         model: str | None = None,
@@ -257,8 +266,8 @@ class SessionManager:
     ) -> tuple[SessionData, bool]:
         """Returns (session, is_new). Reuses if fresh, creates if stale."""
         sessions = await self._load()
-        key = str(chat_id)
-        existing = sessions.get(key)
+        skey = key.storage_key
+        existing = sessions.get(skey)
 
         prov = provider or self._config.provider
         model_name = model or self._config.model
@@ -283,24 +292,25 @@ class SessionManager:
             return existing, not bool(existing.session_id)
 
         new = SessionData(
-            chat_id=chat_id,
+            chat_id=key.chat_id,
+            topic_id=key.topic_id,
             provider=prov,
             model=model_name,
             provider_sessions={},
         )
-        sessions[key] = new
+        sessions[skey] = new
         await self._save(sessions)
         logger.info("Session created provider=%s model=%s", prov, model_name)
         return new, True
 
-    async def get_active(self, chat_id: int) -> SessionData | None:
-        """Return the current session for chat_id without creating one."""
+    async def get_active(self, key: SessionKey) -> SessionData | None:
+        """Return the current session for *key* without creating one."""
         sessions = await self._load()
-        return sessions.get(str(chat_id))
+        return sessions.get(key.storage_key)
 
     async def reset_session(
         self,
-        chat_id: int,
+        key: SessionKey,
         *,
         provider: str | None = None,
         model: str | None = None,
@@ -310,29 +320,31 @@ class SessionManager:
         prov = provider or self._config.provider
         model_name = model or self._config.model
         new = SessionData(
-            chat_id=chat_id,
+            chat_id=key.chat_id,
+            topic_id=key.topic_id,
             provider=prov,
             model=model_name,
             provider_sessions={},
         )
-        sessions[str(chat_id)] = new
+        sessions[key.storage_key] = new
         await self._save(sessions)
         logger.info("Session reset")
         return new
 
     async def reset_provider_session(
         self,
-        chat_id: int,
+        key: SessionKey,
         provider: str,
         model: str,
     ) -> SessionData:
         """Reset only one provider-local session and keep all others intact."""
         sessions = await self._load()
-        key = str(chat_id)
-        current = sessions.get(key)
+        skey = key.storage_key
+        current = sessions.get(skey)
         if current is None:
             current = SessionData(
-                chat_id=chat_id,
+                chat_id=key.chat_id,
+                topic_id=key.topic_id,
                 provider=provider,
                 model=model,
                 provider_sessions={},
@@ -342,7 +354,7 @@ class SessionManager:
             current.provider = provider
             current.model = model
             current.last_active = datetime.now(UTC).isoformat()
-        sessions[key] = current
+        sessions[skey] = current
         await self._save(sessions)
         logger.info("Provider session reset provider=%s model=%s", provider, model)
         return current
@@ -360,7 +372,7 @@ class SessionManager:
         """
         async with self._lock:
             sessions = await self._load()
-            key = str(session.chat_id)
+            key = session.session_key.storage_key
             current = sessions.get(key)
             if current is None:
                 current = session
@@ -431,8 +443,8 @@ class SessionManager:
         """Persist provider/model changes without touching activity counters."""
         async with self._lock:
             sessions = await self._load()
-            key = str(session.chat_id)
-            current = sessions.get(key)
+            skey = session.session_key.storage_key
+            current = sessions.get(skey)
             if current is None:
                 return
 
@@ -448,19 +460,19 @@ class SessionManager:
             if not changed:
                 needs_model_migration = await asyncio.to_thread(
                     self._raw_entry_missing_model,
-                    session.chat_id,
+                    skey,
                 )
             if not changed and not needs_model_migration:
                 return
 
-            sessions[key] = current
+            sessions[skey] = current
             await self._save(sessions)
 
             # Keep caller reference aligned with persisted target.
             session.provider = current.provider
             session.model = current.model
 
-    def _raw_entry_missing_model(self, chat_id: int) -> bool:
+    def _raw_entry_missing_model(self, storage_key: str) -> bool:
         """Return True when raw session JSON exists but has no ``model`` key."""
         if not self._path.exists():
             return False
@@ -468,7 +480,7 @@ class SessionManager:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return False
-        entry = data.get(str(chat_id))
+        entry = data.get(storage_key)
         return isinstance(entry, dict) and "model" not in entry
 
     def _is_fresh(self, session: SessionData) -> bool:
@@ -522,7 +534,13 @@ class SessionManager:
             data = load_json(self._path)
             if data is None:
                 return {}
-            return {k: SessionData(**v) for k, v in data.items()}
+            result: dict[str, SessionData] = {}
+            for k, v in data.items():
+                parsed = SessionKey.parse(k)
+                if "topic_id" not in v and parsed.topic_id is not None:
+                    v["topic_id"] = parsed.topic_id
+                result[k] = SessionData(**v)
+            return result
 
         return await asyncio.to_thread(_read)
 

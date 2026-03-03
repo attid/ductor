@@ -18,7 +18,7 @@ from ductor_bot.infra.inflight import InflightTurn
 from ductor_bot.log_context import set_log_context
 from ductor_bot.orchestrator.hooks import HookContext
 from ductor_bot.orchestrator.registry import OrchestratorResult
-from ductor_bot.session import SessionData
+from ductor_bot.session import SessionData, SessionKey
 from ductor_bot.text.response_format import session_error_text
 from ductor_bot.workspace.loader import read_mainmemory
 
@@ -55,7 +55,7 @@ def _make_timeout_controller(orch: Orchestrator, kind: str) -> TimeoutController
 
 async def _prepare_normal(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     text: str,
     *,
     model_override: str | None = None,
@@ -68,7 +68,7 @@ async def _prepare_normal(
     req_model, req_provider = orch.resolve_runtime_target(requested_model)
 
     session, is_new = await orch._sessions.resolve_session(
-        chat_id,
+        key,
         provider=req_provider,
         model=req_model,
         preserve_existing_target=model_override is None,
@@ -100,7 +100,7 @@ async def _prepare_normal(
             append_prompt = f"{append_prompt}\n\n{roster}" if append_prompt else roster
 
     hook_ctx = HookContext(
-        chat_id=chat_id,
+        chat_id=key.chat_id,
         message_count=session.message_count,
         is_new_session=is_new,
         provider=req_provider,
@@ -114,7 +114,7 @@ async def _prepare_normal(
         append_system_prompt=append_prompt,
         model_override=req_model,
         provider_override=req_provider,
-        chat_id=chat_id,
+        chat_id=key.chat_id,
         resume_session=None if is_new else session.session_id,
         timeout_seconds=timeout_secs,
         timeout_controller=_make_timeout_controller(orch, "normal"),
@@ -140,14 +140,14 @@ async def _update_session(
 
 async def _reset_on_error(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     *,
     model_name: str,
     provider_name: str,
     cli_detail: str = "",
 ) -> OrchestratorResult:
     """Kill processes, preserve session, return user-facing error."""
-    await orch._process_registry.kill_all(chat_id)
+    await orch._process_registry.kill_all(key.chat_id)
     logger.warning("Session error preserved model=%s provider=%s", model_name, provider_name)
     return OrchestratorResult(
         text=session_error_text(model_name, cli_detail),
@@ -197,7 +197,7 @@ class _RecoveryContext:
 
 async def _recover_session(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     text: str,
     ctx: _RecoveryContext,
 ) -> tuple[AgentRequest, SessionData, AgentResponse]:
@@ -205,12 +205,12 @@ async def _recover_session(
 
     When callbacks are set in *ctx.cbs*, the retry uses streaming execution.
     """
-    logger.warning("recovery.%s chat=%s action=retry", ctx.reason, chat_id)
+    logger.warning("recovery.%s chat=%s action=retry", ctx.reason, key.chat_id)
     model_name = ctx.model_override or orch._config.model
     provider_name = orch._models.provider_for(model_name)
-    await orch._process_registry.kill_all(chat_id)
-    orch._process_registry.clear_abort(chat_id)
-    await orch._sessions.reset_provider_session(chat_id, provider=provider_name, model=model_name)
+    await orch._process_registry.kill_all(key.chat_id)
+    orch._process_registry.clear_abort(key.chat_id)
+    await orch._sessions.reset_provider_session(key, provider=provider_name, model=model_name)
 
     cb = ctx.cbs
     if ctx.reason == "invalid_session" and cb.on_text_delta is not None:
@@ -218,7 +218,7 @@ async def _recover_session(
     elif cb.on_system_status is not None:
         await cb.on_system_status("recovering")
 
-    request, session = await _prepare_normal(orch, chat_id, text, model_override=ctx.model_override)
+    request, session = await _prepare_normal(orch, key, text, model_override=ctx.model_override)
     if ctx.streaming:
         response = await orch._cli_service.execute_streaming(
             request,
@@ -291,7 +291,7 @@ async def _gemini_missing_config_key_warning(
 
 async def normal(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     text: str,
     *,
     model_override: str | None = None,
@@ -299,7 +299,7 @@ async def normal(
 ) -> OrchestratorResult:
     """Handle normal conversation with session resume."""
     logger.info("Normal flow starting")
-    request, session = await _prepare_normal(orch, chat_id, text, model_override=model_override)
+    request, session = await _prepare_normal(orch, key, text, model_override=model_override)
     warning = await _gemini_missing_config_key_warning(orch, request)
     if warning is not None:
         logger.warning("Gemini API-key mode without configured ductor key")
@@ -309,22 +309,24 @@ async def normal(
     try:
         response = await orch._cli_service.execute(request)
         session_recovered = False
-        if not orch._process_registry.was_aborted(chat_id) and _needs_session_recovery(response):
+        if not orch._process_registry.was_aborted(key.chat_id) and _needs_session_recovery(
+            response
+        ):
             session_recovered = _is_invalid_session(response)
             reason = "invalid_session" if session_recovered else "sigkill"
             ctx = _RecoveryContext(reason=reason, model_override=model_override)
-            request, session, response = await _recover_session(orch, chat_id, text, ctx)
-        if orch._process_registry.was_aborted(chat_id):
+            request, session, response = await _recover_session(orch, key, text, ctx)
+        if orch._process_registry.was_aborted(key.chat_id):
             logger.info("Normal flow aborted by user")
             return OrchestratorResult(text="")
         if response.is_error:
             if _is_sigkill(response):
-                logger.warning("recovery.sigkill chat=%s action=user-retry", chat_id)
+                logger.warning("recovery.sigkill chat=%s action=user-retry", key.chat_id)
                 return OrchestratorResult(text=_SIGKILL_USER_MSG, stream_fallback=True)
             model_name, provider_name = _request_target(orch, request)
             return await _reset_on_error(
                 orch,
-                chat_id,
+                key,
                 model_name=model_name,
                 provider_name=provider_name,
                 cli_detail=response.result,
@@ -336,12 +338,12 @@ async def normal(
             result.text = f"{_SESSION_RECOVERED_MSG}\n\n{result.text}"
         return result
     finally:
-        orch._inflight_tracker.complete(chat_id)
+        orch._inflight_tracker.complete(key.chat_id)
 
 
 async def normal_streaming(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     text: str,
     *,
     model_override: str | None = None,
@@ -349,7 +351,7 @@ async def normal_streaming(
 ) -> OrchestratorResult:
     """Handle normal conversation with streaming output."""
     logger.info("Streaming flow starting")
-    request, session = await _prepare_normal(orch, chat_id, text, model_override=model_override)
+    request, session = await _prepare_normal(orch, key, text, model_override=model_override)
     warning = await _gemini_missing_config_key_warning(orch, request)
     if warning is not None:
         logger.warning("Gemini API-key mode without configured ductor key")
@@ -364,23 +366,25 @@ async def normal_streaming(
             on_tool_activity=cb.on_tool_activity,
             on_system_status=cb.on_system_status,
         )
-        if not orch._process_registry.was_aborted(chat_id) and _needs_session_recovery(response):
+        if not orch._process_registry.was_aborted(key.chat_id) and _needs_session_recovery(
+            response
+        ):
             reason = "invalid_session" if _is_invalid_session(response) else "sigkill"
             ctx = _RecoveryContext(
                 reason=reason, model_override=model_override, streaming=True, cbs=cb
             )
-            request, session, response = await _recover_session(orch, chat_id, text, ctx)
-        if orch._process_registry.was_aborted(chat_id):
+            request, session, response = await _recover_session(orch, key, text, ctx)
+        if orch._process_registry.was_aborted(key.chat_id):
             logger.info("Streaming flow aborted by user")
             return OrchestratorResult(text="")
         if response.is_error:
             if _is_sigkill(response):
-                logger.warning("recovery.sigkill chat=%s action=user-retry", chat_id)
+                logger.warning("recovery.sigkill chat=%s action=user-retry", key.chat_id)
                 return OrchestratorResult(text=_SIGKILL_USER_MSG, stream_fallback=True)
             model_name, provider_name = _request_target(orch, request)
             return await _reset_on_error(
                 orch,
-                chat_id,
+                key,
                 model_name=model_name,
                 provider_name=provider_name,
                 cli_detail=response.result,
@@ -389,7 +393,7 @@ async def normal_streaming(
         logger.info("Streaming flow completed")
         return _finish_normal(response, session, orch._config.session_age_warning_hours)
     finally:
-        orch._inflight_tracker.complete(chat_id)
+        orch._inflight_tracker.complete(key.chat_id)
 
 
 def _session_age_note(session: SessionData, warning_hours: int) -> str:
@@ -487,12 +491,12 @@ def _strip_ack_token(text: str, token: str) -> str:
 
 async def named_session_flow(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     session_name: str,
     text: str,
 ) -> OrchestratorResult:
     """Handle a foreground follow-up to a named session (non-streaming)."""
-    ns = orch._named_sessions.get(chat_id, session_name)
+    ns = orch._named_sessions.get(key.chat_id, session_name)
     if ns is None:
         return OrchestratorResult(text=f"Session '{session_name}' not found.")
     if ns.status == "ended":
@@ -505,12 +509,12 @@ async def named_session_flow(
         )
 
     tag = f"**[{session_name} | {ns.provider}]**\n"
-    orch._named_sessions.mark_running(chat_id, session_name, text)
+    orch._named_sessions.mark_running(key.chat_id, session_name, text)
     request = AgentRequest(
         prompt=text,
         model_override=ns.model,
         provider_override=ns.provider,
-        chat_id=chat_id,
+        chat_id=key.chat_id,
         process_label=f"ns:{session_name}",
         resume_session=ns.session_id or None,
         timeout_seconds=resolve_timeout(orch._config, "normal"),
@@ -518,27 +522,27 @@ async def named_session_flow(
     )
     response = await orch._cli_service.execute(request)
 
-    if orch._process_registry.was_aborted(chat_id):
+    if orch._process_registry.was_aborted(key.chat_id):
         ns.status = "idle"
         return OrchestratorResult(text="")
     if response.is_error:
         ns.status = "idle"
         return OrchestratorResult(text=f"{tag}Error: {response.result[:500]}")
 
-    orch._named_sessions.update_after_response(chat_id, session_name, response.session_id or "")
+    orch._named_sessions.update_after_response(key.chat_id, session_name, response.session_id or "")
     return OrchestratorResult(text=f"{tag}{response.result}")
 
 
 async def named_session_streaming(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     session_name: str,
     text: str,
     *,
     cbs: StreamingCallbacks | None = None,
 ) -> OrchestratorResult:
     """Handle a foreground streaming follow-up to a named session."""
-    ns = orch._named_sessions.get(chat_id, session_name)
+    ns = orch._named_sessions.get(key.chat_id, session_name)
     if ns is None:
         return OrchestratorResult(text=f"Session '{session_name}' not found.")
     if ns.status == "ended":
@@ -552,12 +556,12 @@ async def named_session_streaming(
 
     cb = cbs or StreamingCallbacks()
     tag = f"**[{session_name} | {ns.provider}]**\n"
-    orch._named_sessions.mark_running(chat_id, session_name, text)
+    orch._named_sessions.mark_running(key.chat_id, session_name, text)
     request = AgentRequest(
         prompt=text,
         model_override=ns.model,
         provider_override=ns.provider,
-        chat_id=chat_id,
+        chat_id=key.chat_id,
         process_label=f"ns:{session_name}",
         resume_session=ns.session_id or None,
         timeout_seconds=resolve_timeout(orch._config, "normal"),
@@ -581,14 +585,14 @@ async def named_session_streaming(
         on_system_status=cb.on_system_status,
     )
 
-    if orch._process_registry.was_aborted(chat_id):
+    if orch._process_registry.was_aborted(key.chat_id):
         ns.status = "idle"
         return OrchestratorResult(text="")
     if response.is_error:
         ns.status = "idle"
         return OrchestratorResult(text=f"{tag}Error: {response.result[:500]}")
 
-    orch._named_sessions.update_after_response(chat_id, session_name, response.session_id or "")
+    orch._named_sessions.update_after_response(key.chat_id, session_name, response.session_id or "")
     return OrchestratorResult(text=f"{tag}{response.result}")
 
 
@@ -597,7 +601,7 @@ async def named_session_streaming(
 # ---------------------------------------------------------------------------
 
 
-async def heartbeat_flow(orch: Orchestrator, chat_id: int) -> str | None:
+async def heartbeat_flow(orch: Orchestrator, key: SessionKey) -> str | None:
     """Run a heartbeat turn in the existing session.
 
     Returns the alert text if the model has something to say, or None if the
@@ -608,7 +612,7 @@ async def heartbeat_flow(orch: Orchestrator, chat_id: int) -> str | None:
     req_model, req_provider = orch.resolve_runtime_target(orch._config.model)
 
     # Read-only check: never create/overwrite a session from the heartbeat path.
-    session = await orch._sessions.get_active(chat_id)
+    session = await orch._sessions.get_active(key)
 
     if not session or not session.session_id:
         logger.debug("Heartbeat skipped: no active session")
@@ -640,7 +644,7 @@ async def heartbeat_flow(orch: Orchestrator, chat_id: int) -> str | None:
         prompt=hb_cfg.prompt,
         model_override=req_model,
         provider_override=req_provider,
-        chat_id=chat_id,
+        chat_id=key.chat_id,
         resume_session=session.session_id,
         timeout_seconds=resolve_timeout(orch._config, "normal"),
         timeout_controller=_make_timeout_controller(orch, "normal"),

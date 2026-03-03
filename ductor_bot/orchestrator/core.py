@@ -66,7 +66,7 @@ from ductor_bot.orchestrator.hooks import (
 from ductor_bot.orchestrator.observers import ObserverManager
 from ductor_bot.orchestrator.registry import CommandRegistry, OrchestratorResult
 from ductor_bot.security import detect_suspicious_patterns
-from ductor_bot.session import SessionManager
+from ductor_bot.session import SessionKey, SessionManager
 from ductor_bot.session.named import NamedSessionRegistry
 from ductor_bot.webhook.manager import WebhookManager
 from ductor_bot.webhook.models import WebhookResult
@@ -108,7 +108,7 @@ class NamedSessionRequest:
 class _MessageDispatch:
     """Normalized input for one orchestrator message routing pass."""
 
-    chat_id: int
+    key: SessionKey
     text: str
     cmd: str
     streaming: bool = False
@@ -177,7 +177,9 @@ class Orchestrator:
         self._cron_manager = CronManager(jobs_path=paths.cron_jobs_path)
         self._webhook_manager = WebhookManager(hooks_path=paths.webhooks_path)
         self._observers = ObserverManager(config, paths)
-        self._observers.heartbeat.set_heartbeat_handler(self.handle_heartbeat)
+        self._observers.heartbeat.set_heartbeat_handler(
+            lambda chat_id: self.handle_heartbeat(SessionKey(chat_id=chat_id))
+        )
         self._observers.heartbeat.set_busy_check(self._process_registry.has_active)
         stale_max = config.cli_timeout * 2
         self._observers.heartbeat.set_stale_cleanup(
@@ -414,14 +416,14 @@ class Orchestrator:
             providers.append({"id": pid, "name": name, "color": color, "models": models})
         return providers
 
-    async def handle_message(self, chat_id: int, text: str) -> OrchestratorResult:
+    async def handle_message(self, key: SessionKey, text: str) -> OrchestratorResult:
         """Main entry point: route message to appropriate handler."""
-        dispatch = _MessageDispatch(chat_id=chat_id, text=text, cmd=text.strip().lower())
+        dispatch = _MessageDispatch(key=key, text=text, cmd=text.strip().lower())
         return await self._handle_message_impl(dispatch)
 
     async def handle_message_streaming(
         self,
-        chat_id: int,
+        key: SessionKey,
         text: str,
         *,
         on_text_delta: _TextCallback | None = None,
@@ -430,7 +432,7 @@ class Orchestrator:
     ) -> OrchestratorResult:
         """Main entry point with streaming support."""
         dispatch = _MessageDispatch(
-            chat_id=chat_id,
+            key=key,
             text=text,
             cmd=text.strip().lower(),
             streaming=True,
@@ -441,7 +443,7 @@ class Orchestrator:
         return await self._handle_message_impl(dispatch)
 
     async def _handle_message_impl(self, dispatch: _MessageDispatch) -> OrchestratorResult:
-        self._process_registry.clear_abort(dispatch.chat_id)
+        self._process_registry.clear_abort(dispatch.key.chat_id)
         logger.info("Message received text=%s", dispatch.cmd[:80])
 
         patterns = detect_suspicious_patterns(dispatch.text)
@@ -463,7 +465,7 @@ class Orchestrator:
         result = await self._command_registry.dispatch(
             dispatch.cmd,
             self,
-            dispatch.chat_id,
+            dispatch.key,
             dispatch.text,
         )
         if result is not None:
@@ -476,18 +478,18 @@ class Orchestrator:
         # Check if a leading @directive matches a named session
         if directives.raw_directives:
             first_key = next(iter(directives.raw_directives))
-            ns = self._named_sessions.get(dispatch.chat_id, first_key)
+            ns = self._named_sessions.get(dispatch.key.chat_id, first_key)
             if ns is not None:
                 session_prompt = directives.cleaned or dispatch.text
                 if dispatch.streaming:
                     return await named_session_streaming(
                         self,
-                        dispatch.chat_id,
+                        dispatch.key,
                         first_key,
                         session_prompt,
                         cbs=dispatch.streaming_callbacks(),
                     )
-                return await named_session_flow(self, dispatch.chat_id, first_key, session_prompt)
+                return await named_session_flow(self, dispatch.key, first_key, session_prompt)
 
         if directives.is_directive_only and directives.has_model:
             return OrchestratorResult(
@@ -500,7 +502,7 @@ class Orchestrator:
         if dispatch.streaming:
             return await normal_streaming(
                 self,
-                dispatch.chat_id,
+                dispatch.key,
                 prompt_text,
                 model_override=directives.model,
                 cbs=dispatch.streaming_callbacks(),
@@ -508,7 +510,7 @@ class Orchestrator:
 
         return await normal(
             self,
-            dispatch.chat_id,
+            dispatch.key,
             prompt_text,
             model_override=directives.model,
         )
@@ -550,14 +552,14 @@ class Orchestrator:
         reg.register_async("/agent_restart ", cmd_agent_restart)
         logger.info("Multi-agent commands registered")
 
-    async def reset_session(self, chat_id: int) -> None:
-        """Reset the session for a given chat."""
-        await self._sessions.reset_session(chat_id)
+    async def reset_session(self, key: SessionKey) -> None:
+        """Reset the session for a given key."""
+        await self._sessions.reset_session(key)
         logger.info("Session reset")
 
-    async def reset_active_provider_session(self, chat_id: int) -> str:
-        """Reset only the active provider session bucket for a given chat."""
-        active = await self._sessions.get_active(chat_id)
+    async def reset_active_provider_session(self, key: SessionKey) -> str:
+        """Reset only the active provider session bucket for a given key."""
+        active = await self._sessions.get_active(key)
         if active is not None:
             provider = active.provider
             model = active.model
@@ -565,7 +567,7 @@ class Orchestrator:
             model, provider = self.resolve_runtime_target(self._config.model)
 
         await self._sessions.reset_provider_session(
-            chat_id,
+            key,
             provider=provider,
             model=model,
         )
@@ -599,10 +601,10 @@ class Orchestrator:
         """Forward heartbeat alert messages to an external handler (e.g. Telegram)."""
         self._observers.set_heartbeat_result_handler(handler)
 
-    async def handle_heartbeat(self, chat_id: int) -> str | None:
+    async def handle_heartbeat(self, key: SessionKey) -> str | None:
         """Run a heartbeat turn in the main session. Returns alert text or None."""
         logger.debug("Heartbeat flow starting")
-        return await heartbeat_flow(self, chat_id)
+        return await heartbeat_flow(self, key)
 
     def set_webhook_result_handler(
         self,

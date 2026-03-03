@@ -21,6 +21,7 @@ from ductor_bot.orchestrator.model_selector import (
     model_selector_start,
     switch_model,
 )
+from ductor_bot.session.key import SessionKey
 
 _AUTHED_CLAUDE = AuthResult("claude", AuthStatus.AUTHENTICATED)
 _AUTHED_CODEX = AuthResult("codex", AuthStatus.AUTHENTICATED)
@@ -97,7 +98,7 @@ async def test_start_no_providers(orch: Orchestrator) -> None:
     with _patch_auth(
         {"claude": _NOT_FOUND_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
-        text, keyboard = await model_selector_start(orch, 1)
+        text, keyboard = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "No authenticated providers" in text
     assert keyboard is None
 
@@ -106,7 +107,7 @@ async def test_start_one_provider_claude(orch: Orchestrator) -> None:
     with _patch_auth(
         {"claude": _AUTHED_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
-        text, keyboard = await model_selector_start(orch, 1)
+        text, keyboard = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Select Claude model" in text
     assert keyboard is not None
     labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
@@ -122,7 +123,7 @@ async def test_start_one_provider_codex(orch: Orchestrator) -> None:
         ),
         _with_codex_cache(orch),
     ):
-        text, keyboard = await model_selector_start(orch, 1)
+        text, keyboard = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Select Codex model" in text
     assert keyboard is not None
 
@@ -135,7 +136,7 @@ async def test_start_shows_configured_model_without_runtime_fallback(orch: Orche
         ),
         _with_codex_cache(orch),
     ):
-        text, keyboard = await model_selector_start(orch, 1)
+        text, keyboard = await model_selector_start(orch, SessionKey(chat_id=1))
     assert keyboard is not None
     assert "Current: opus" in text
     assert "Configured default:" not in text
@@ -145,7 +146,7 @@ async def test_start_two_providers(orch: Orchestrator) -> None:
     with _patch_auth(
         {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
-        text, keyboard = await model_selector_start(orch, 1)
+        text, keyboard = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Model Selector" in text
     assert keyboard is not None
     labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
@@ -166,7 +167,7 @@ async def test_start_one_provider_gemini_uses_discovered_models(orch: Orchestrat
     with _patch_auth(
         {"claude": _NOT_FOUND_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _AUTHED_GEMINI}
     ):
-        text, keyboard = await model_selector_start(orch, 1)
+        text, keyboard = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Select Gemini model" in text
     assert keyboard is not None
     labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
@@ -179,7 +180,7 @@ async def test_start_one_provider_gemini_uses_discovered_models(orch: Orchestrat
 
 
 async def test_callback_provider_claude(orch: Orchestrator) -> None:
-    text, keyboard = await handle_model_callback(orch, 1, "ms:p:claude")
+    text, keyboard = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:p:claude")
     assert "Select Claude model" in text
     assert keyboard is not None
     labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
@@ -189,7 +190,7 @@ async def test_callback_provider_claude(orch: Orchestrator) -> None:
 
 async def test_callback_provider_codex(orch: Orchestrator) -> None:
     with _with_codex_cache(orch):
-        text, keyboard = await handle_model_callback(orch, 1, "ms:p:codex")
+        text, keyboard = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:p:codex")
     assert "Select Codex model" in text
     assert keyboard is not None
     labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
@@ -198,7 +199,7 @@ async def test_callback_provider_codex(orch: Orchestrator) -> None:
 
 async def test_callback_provider_codex_fallback(orch: Orchestrator) -> None:
     with _with_codex_cache(orch, models=[]):
-        _text, keyboard = await handle_model_callback(orch, 1, "ms:p:codex")
+        _text, keyboard = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:p:codex")
     assert keyboard is not None
     labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
     assert any("o3" in label.lower() for label in labels) or "<< Back" in labels
@@ -209,7 +210,7 @@ async def test_callback_provider_codex_fallback(orch: Orchestrator) -> None:
 
 async def test_callback_model_claude_switches(orch: Orchestrator) -> None:
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    text, keyboard = await handle_model_callback(orch, 1, "ms:m:sonnet")
+    text, keyboard = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:m:sonnet")
     assert "sonnet" in text
     assert keyboard is None
     assert orch._config.model == "sonnet"
@@ -217,7 +218,9 @@ async def test_callback_model_claude_switches(orch: Orchestrator) -> None:
 
 async def test_callback_model_codex_shows_reasoning(orch: Orchestrator) -> None:
     with _with_codex_cache(orch):
-        text, keyboard = await handle_model_callback(orch, 1, "ms:m:gpt-5.2-codex")
+        text, keyboard = await handle_model_callback(
+            orch, SessionKey(chat_id=1), "ms:m:gpt-5.2-codex"
+        )
     assert "Thinking level" in text
     assert keyboard is not None
     labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
@@ -228,7 +231,9 @@ async def test_callback_model_codex_shows_reasoning(orch: Orchestrator) -> None:
 
 async def test_callback_model_codex_mini_limited_efforts(orch: Orchestrator) -> None:
     with _with_codex_cache(orch):
-        _text, keyboard = await handle_model_callback(orch, 1, "ms:m:gpt-5.1-codex-mini")
+        _text, keyboard = await handle_model_callback(
+            orch, SessionKey(chat_id=1), "ms:m:gpt-5.1-codex-mini"
+        )
     assert keyboard is not None
     labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
     assert "Medium" in labels
@@ -242,7 +247,9 @@ async def test_callback_model_codex_mini_limited_efforts(orch: Orchestrator) -> 
 
 async def test_callback_reasoning_switches(orch: Orchestrator) -> None:
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    text, keyboard = await handle_model_callback(orch, 1, "ms:r:high:gpt-5.2-codex")
+    text, keyboard = await handle_model_callback(
+        orch, SessionKey(chat_id=1), "ms:r:high:gpt-5.2-codex"
+    )
     assert "gpt-5.2-codex" in text
     assert "high" in text.lower()
     assert keyboard is None
@@ -255,14 +262,14 @@ async def test_callback_back_root(orch: Orchestrator) -> None:
     with _patch_auth(
         {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
-        _text, keyboard = await handle_model_callback(orch, 1, "ms:b:root")
+        _text, keyboard = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:b:root")
     assert keyboard is not None
     labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
     assert "CLAUDE" in labels
 
 
 async def test_callback_back_provider(orch: Orchestrator) -> None:
-    text, _keyboard = await handle_model_callback(orch, 1, "ms:b:claude")
+    text, _keyboard = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:b:claude")
     assert "Select Claude model" in text
 
 
@@ -274,7 +281,7 @@ async def test_switch_model_basic(orch: Orchestrator) -> None:
     mock_reset = AsyncMock()
     object.__setattr__(orch._process_registry, "kill_all", mock_kill)
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset)
-    result = await switch_model(orch, 1, "sonnet")
+    result = await switch_model(orch, SessionKey(chat_id=1), "sonnet")
     assert "opus" in result
     assert "sonnet" in result
     assert "Session reset" not in result
@@ -285,13 +292,13 @@ async def test_switch_model_basic(orch: Orchestrator) -> None:
 
 
 async def test_switch_model_already_set(orch: Orchestrator) -> None:
-    result = await switch_model(orch, 1, "opus")
+    result = await switch_model(orch, SessionKey(chat_id=1), "opus")
     assert "Already running" in result
 
 
 async def test_switch_model_with_reasoning_effort(orch: Orchestrator) -> None:
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    result = await switch_model(orch, 1, "sonnet", reasoning_effort="high")
+    result = await switch_model(orch, SessionKey(chat_id=1), "sonnet", reasoning_effort="high")
     assert "high" in result.lower()
     assert orch._config.reasoning_effort == "high"
     saved = json.loads(orch.paths.config_path.read_text(encoding="utf-8"))
@@ -300,7 +307,7 @@ async def test_switch_model_with_reasoning_effort(orch: Orchestrator) -> None:
 
 async def test_switch_model_persists_to_config(orch: Orchestrator) -> None:
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    await switch_model(orch, 1, "sonnet")
+    await switch_model(orch, SessionKey(chat_id=1), "sonnet")
     saved = json.loads(orch.paths.config_path.read_text(encoding="utf-8"))
     assert saved["model"] == "sonnet"
 
@@ -309,19 +316,21 @@ async def test_switch_model_provider_change(orch: Orchestrator) -> None:
     mock_reset = AsyncMock()
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset)
-    result = await switch_model(orch, 1, "o3")
+    result = await switch_model(orch, SessionKey(chat_id=1), "o3")
     assert "Provider:" in result
     assert orch._config.provider == "codex"
     mock_reset.assert_not_called()
 
 
 async def test_switch_model_shows_resume_hint_same_provider(orch: Orchestrator) -> None:
-    session, _ = await orch._sessions.resolve_session(1, provider="claude", model="opus")
+    session, _ = await orch._sessions.resolve_session(
+        SessionKey(chat_id=1), provider="claude", model="opus"
+    )
     session.session_id = "claude-abc123"
     await orch._sessions.update_session(session)
 
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    result = await switch_model(orch, 1, "sonnet")
+    result = await switch_model(orch, SessionKey(chat_id=1), "sonnet")
 
     assert "Resuming session `claude-abc123`." in result
     assert "You have already sent 1 message in this provider session." in result
@@ -330,12 +339,14 @@ async def test_switch_model_shows_resume_hint_same_provider(orch: Orchestrator) 
 
 
 async def test_switch_model_shows_resume_hint_provider_change(orch: Orchestrator) -> None:
-    session, _ = await orch._sessions.resolve_session(1, provider="codex", model="gpt-5.2-codex")
+    session, _ = await orch._sessions.resolve_session(
+        SessionKey(chat_id=1), provider="codex", model="gpt-5.2-codex"
+    )
     session.session_id = "codex-xyz789"
     await orch._sessions.update_session(session)
 
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    result = await switch_model(orch, 1, "o3")
+    result = await switch_model(orch, SessionKey(chat_id=1), "o3")
 
     assert "Resuming session `codex-xyz789`." in result
     assert "You have already sent 1 message in this provider session." in result
@@ -349,7 +360,7 @@ async def test_switch_reasoning_only(orch: Orchestrator) -> None:
     mock_reset = AsyncMock()
     object.__setattr__(orch._process_registry, "kill_all", mock_kill)
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset)
-    result = await switch_model(orch, 1, "opus", reasoning_effort="high")
+    result = await switch_model(orch, SessionKey(chat_id=1), "opus", reasoning_effort="high")
     assert "Reasoning effort updated" in result
     mock_kill.assert_not_called()
     mock_reset.assert_not_called()

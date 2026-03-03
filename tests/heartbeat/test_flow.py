@@ -12,6 +12,7 @@ import time_machine
 from ductor_bot.cli.types import AgentResponse
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.orchestrator.flows import heartbeat_flow
+from ductor_bot.session.key import SessionKey
 
 
 def _mock_response(**kwargs: Any) -> AgentResponse:
@@ -45,7 +46,7 @@ async def test_heartbeat_ok_returns_none(
     monkeypatch.setattr(
         orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result="Hello"))
     )
-    await normal(orch, 1, "init")
+    await normal(orch, SessionKey(chat_id=1), "init")
 
     with _past_cooldown():
         monkeypatch.setattr(
@@ -53,7 +54,7 @@ async def test_heartbeat_ok_returns_none(
             "execute",
             AsyncMock(return_value=_mock_response(result="HEARTBEAT_OK")),
         )
-        result = await heartbeat_flow(orch, 1)
+        result = await heartbeat_flow(orch, SessionKey(chat_id=1))
         assert result is None
 
 
@@ -66,20 +67,20 @@ async def test_heartbeat_alert_returns_text(
     monkeypatch.setattr(
         orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result="Hello"))
     )
-    await normal(orch, 1, "init")
+    await normal(orch, SessionKey(chat_id=1), "init")
 
     alert = "Hey! I found something interesting about Python 3.14!"
     with _past_cooldown():
         monkeypatch.setattr(
             orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result=alert))
         )
-        result = await heartbeat_flow(orch, 1)
+        result = await heartbeat_flow(orch, SessionKey(chat_id=1))
         assert result == alert
 
 
 async def test_heartbeat_skips_new_session(orch: Orchestrator) -> None:
     """Heartbeat does nothing if there is no established session."""
-    result = await heartbeat_flow(orch, 999)
+    result = await heartbeat_flow(orch, SessionKey(chat_id=999))
     assert result is None
 
 
@@ -92,9 +93,9 @@ async def test_heartbeat_ok_does_not_increment_message_count(
     monkeypatch.setattr(
         orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result="Hello"))
     )
-    await normal(orch, 1, "init")
+    await normal(orch, SessionKey(chat_id=1), "init")
 
-    session_before = await orch._sessions.get_active(1)
+    session_before = await orch._sessions.get_active(SessionKey(chat_id=1))
     assert session_before is not None
     count_before = session_before.message_count
 
@@ -104,9 +105,9 @@ async def test_heartbeat_ok_does_not_increment_message_count(
             "execute",
             AsyncMock(return_value=_mock_response(result="HEARTBEAT_OK")),
         )
-        await heartbeat_flow(orch, 1)
+        await heartbeat_flow(orch, SessionKey(chat_id=1))
 
-    session_after = await orch._sessions.get_active(1)
+    session_after = await orch._sessions.get_active(SessionKey(chat_id=1))
     assert session_after is not None
     assert session_after.message_count == count_before
 
@@ -120,9 +121,9 @@ async def test_heartbeat_alert_increments_message_count(
     monkeypatch.setattr(
         orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result="Hello"))
     )
-    await normal(orch, 1, "init")
+    await normal(orch, SessionKey(chat_id=1), "init")
 
-    session_before = await orch._sessions.get_active(1)
+    session_before = await orch._sessions.get_active(SessionKey(chat_id=1))
     assert session_before is not None
     count_before = session_before.message_count
 
@@ -131,9 +132,9 @@ async def test_heartbeat_alert_increments_message_count(
         monkeypatch.setattr(
             orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result=alert))
         )
-        await heartbeat_flow(orch, 1)
+        await heartbeat_flow(orch, SessionKey(chat_id=1))
 
-    session_after = await orch._sessions.get_active(1)
+    session_after = await orch._sessions.get_active(SessionKey(chat_id=1))
     assert session_after is not None
     assert session_after.message_count == count_before + 1
 
@@ -147,7 +148,7 @@ async def test_heartbeat_cli_error_returns_none(
     monkeypatch.setattr(
         orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result="Hello"))
     )
-    await normal(orch, 1, "init")
+    await normal(orch, SessionKey(chat_id=1), "init")
 
     with _past_cooldown():
         monkeypatch.setattr(
@@ -155,7 +156,7 @@ async def test_heartbeat_cli_error_returns_none(
             "execute",
             AsyncMock(return_value=_mock_response(is_error=True, result="Rate limited")),
         )
-        result = await heartbeat_flow(orch, 1)
+        result = await heartbeat_flow(orch, SessionKey(chat_id=1))
         assert result is None
 
 
@@ -171,13 +172,13 @@ async def test_heartbeat_does_not_apply_hooks(
 
     # Send 5 messages to reach hook threshold
     for _ in range(5):
-        await normal(orch, 1, "msg")
+        await normal(orch, SessionKey(chat_id=1), "msg")
 
     # Now heartbeat -- the prompt should be the raw heartbeat prompt, no REMINDER
     with _past_cooldown():
         hb_mock = AsyncMock(return_value=_mock_response(result="HEARTBEAT_OK"))
         monkeypatch.setattr(orch._cli_service, "execute", hb_mock)
-        await heartbeat_flow(orch, 1)
+        await heartbeat_flow(orch, SessionKey(chat_id=1))
 
         hb_request = hb_mock.call_args[0][0]
         assert "REMINDER" not in hb_request.prompt
@@ -193,12 +194,12 @@ async def test_heartbeat_skips_during_cooldown(
     monkeypatch.setattr(
         orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result="Hello"))
     )
-    await normal(orch, 1, "just chatting")
+    await normal(orch, SessionKey(chat_id=1), "just chatting")
 
     # Immediately after user message -> within cooldown -> skip
     cooldown_mock = AsyncMock(return_value=_mock_response(result="HEARTBEAT_OK"))
     monkeypatch.setattr(orch._cli_service, "execute", cooldown_mock)
-    result = await heartbeat_flow(orch, 1)
+    result = await heartbeat_flow(orch, SessionKey(chat_id=1))
     assert result is None
     # CLI should NOT have been called since cooldown skipped early
     cooldown_mock.assert_not_awaited()
@@ -213,14 +214,14 @@ async def test_heartbeat_runs_after_cooldown(
     monkeypatch.setattr(
         orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result="Hello"))
     )
-    await normal(orch, 1, "init")
+    await normal(orch, SessionKey(chat_id=1), "init")
 
     # Travel 10 minutes into the future -> past default 5 min cooldown
     future = datetime.now(UTC) + timedelta(minutes=10)
     with time_machine.travel(future):
         after_cooldown_mock = AsyncMock(return_value=_mock_response(result="HEARTBEAT_OK"))
         monkeypatch.setattr(orch._cli_service, "execute", after_cooldown_mock)
-        result = await heartbeat_flow(orch, 1)
+        result = await heartbeat_flow(orch, SessionKey(chat_id=1))
         assert result is None
         # CLI WAS called (cooldown passed, returned OK)
         after_cooldown_mock.assert_awaited_once()
@@ -232,7 +233,8 @@ async def test_heartbeat_skips_when_session_provider_differs_from_configured_pro
     """Heartbeat should skip when active session provider does not match current provider target."""
     object.__setattr__(orch, "_available_providers", frozenset({"codex"}))
 
-    session, _ = await orch._sessions.resolve_session(1, provider="codex", model="opus")
+    key = SessionKey(chat_id=1)
+    session, _ = await orch._sessions.resolve_session(key, provider="codex", model="opus")
     session.session_id = "legacy-heartbeat-sid"
     await orch._sessions.update_session(session)
     count_before = session.message_count
@@ -243,10 +245,10 @@ async def test_heartbeat_skips_when_session_provider_differs_from_configured_pro
             "execute",
             AsyncMock(return_value=_mock_response(result="HEARTBEAT_OK")),
         )
-        result = await heartbeat_flow(orch, 1)
+        result = await heartbeat_flow(orch, SessionKey(chat_id=1))
         assert result is None
 
-    session_after = await orch._sessions.get_active(1)
+    session_after = await orch._sessions.get_active(SessionKey(chat_id=1))
     assert session_after is not None
     assert session_after.provider == "codex"
     assert session_after.model == "opus"

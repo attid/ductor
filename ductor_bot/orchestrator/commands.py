@@ -21,6 +21,7 @@ from ductor_bot.workspace.loader import read_mainmemory
 
 if TYPE_CHECKING:
     from ductor_bot.orchestrator.core import Orchestrator
+    from ductor_bot.session.key import SessionKey
 
 logger = logging.getLogger(__name__)
 
@@ -28,33 +29,33 @@ logger = logging.getLogger(__name__)
 # -- Command wrappers (registered by Orchestrator._register_commands) --
 
 
-async def cmd_reset(orch: Orchestrator, chat_id: int, _text: str) -> OrchestratorResult:
+async def cmd_reset(orch: Orchestrator, key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /new: kill processes and reset only active provider session."""
     logger.info("Reset requested")
-    await orch._process_registry.kill_all(chat_id)
-    provider = await orch.reset_active_provider_session(chat_id)
+    await orch._process_registry.kill_all(key.chat_id)
+    provider = await orch.reset_active_provider_session(key)
     return OrchestratorResult(text=new_session_text(provider))
 
 
-async def cmd_status(orch: Orchestrator, chat_id: int, _text: str) -> OrchestratorResult:
+async def cmd_status(orch: Orchestrator, key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /status."""
     logger.info("Status requested")
-    return OrchestratorResult(text=await _build_status(orch, chat_id))
+    return OrchestratorResult(text=await _build_status(orch, key))
 
 
-async def cmd_model(orch: Orchestrator, chat_id: int, text: str) -> OrchestratorResult:
+async def cmd_model(orch: Orchestrator, key: SessionKey, text: str) -> OrchestratorResult:
     """Handle /model [name]."""
     logger.info("Model requested")
     parts = text.split(None, 1)
     if len(parts) < 2:
-        msg_text, keyboard = await model_selector_start(orch, chat_id)
+        msg_text, keyboard = await model_selector_start(orch, key)
         return OrchestratorResult(text=msg_text, reply_markup=keyboard)
     name = parts[1].strip()
-    result_text = await switch_model(orch, chat_id, name)
+    result_text = await switch_model(orch, key, name)
     return OrchestratorResult(text=result_text)
 
 
-async def cmd_memory(orch: Orchestrator, _chat_id: int, _text: str) -> OrchestratorResult:
+async def cmd_memory(orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /memory."""
     logger.info("Memory requested")
     content = await asyncio.to_thread(read_mainmemory, orch.paths)
@@ -79,14 +80,14 @@ async def cmd_memory(orch: Orchestrator, _chat_id: int, _text: str) -> Orchestra
     )
 
 
-async def cmd_sessions(orch: Orchestrator, chat_id: int, _text: str) -> OrchestratorResult:
+async def cmd_sessions(orch: Orchestrator, key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /sessions."""
     logger.info("Sessions requested")
-    text, keyboard = await session_selector_start(orch, chat_id)
+    text, keyboard = await session_selector_start(orch, key.chat_id)
     return OrchestratorResult(text=text, reply_markup=keyboard)
 
 
-async def cmd_tasks(orch: Orchestrator, chat_id: int, _text: str) -> OrchestratorResult:
+async def cmd_tasks(orch: Orchestrator, key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /tasks."""
     logger.info("Tasks requested")
     hub = orch.task_hub
@@ -94,18 +95,18 @@ async def cmd_tasks(orch: Orchestrator, chat_id: int, _text: str) -> Orchestrato
         return OrchestratorResult(
             text=fmt("**Background Tasks**", SEP, "Task system is not enabled."),
         )
-    text, keyboard = task_selector_start(hub, chat_id)
+    text, keyboard = task_selector_start(hub, key.chat_id)
     return OrchestratorResult(text=text, reply_markup=keyboard)
 
 
-async def cmd_cron(orch: Orchestrator, _chat_id: int, _text: str) -> OrchestratorResult:
+async def cmd_cron(orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /cron."""
     logger.info("Cron requested")
     text, keyboard = await cron_selector_start(orch)
     return OrchestratorResult(text=text, reply_markup=keyboard)
 
 
-async def cmd_upgrade(_orch: Orchestrator, _chat_id: int, _text: str) -> OrchestratorResult:
+async def cmd_upgrade(_orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /upgrade: check for updates and offer upgrade."""
     logger.info("Upgrade check requested")
 
@@ -229,7 +230,7 @@ def _resolve_log_path(orch: Orchestrator) -> Path:
     return log_path
 
 
-async def cmd_diagnose(orch: Orchestrator, _chat_id: int, _text: str) -> OrchestratorResult:
+async def cmd_diagnose(orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /diagnose."""
     logger.info("Diagnose requested")
     version = get_current_version()
@@ -287,7 +288,7 @@ def _build_agent_health_block(orch: Orchestrator) -> str:
     return "\n".join(agent_lines)
 
 
-async def _build_status(orch: Orchestrator, chat_id: int) -> str:
+async def _build_status(orch: Orchestrator, key: SessionKey) -> str:
     """Build the /status response text."""
     runtime_model, _runtime_provider = orch.resolve_runtime_target(orch._config.model)
     configured_model = orch._config.model
@@ -297,7 +298,7 @@ async def _build_status(orch: Orchestrator, chat_id: int) -> str:
             return f"Model: {model_name}"
         return f"Model: {model_name} (configured: {configured_model})"
 
-    session = await orch._sessions.get_active(chat_id)
+    session = await orch._sessions.get_active(key)
     if session:
         session_block = (
             f"Session: `{session.session_id[:8]}...`\n"
@@ -309,7 +310,7 @@ async def _build_status(orch: Orchestrator, chat_id: int) -> str:
     else:
         session_block = f"No active session.\n{_model_line(runtime_model)}"
 
-    bg_tasks = orch.active_background_tasks(chat_id)
+    bg_tasks = orch.active_background_tasks(key.chat_id)
     bg_block = ""
     if bg_tasks:
         import time

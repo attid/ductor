@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from ductor_bot.bot.sender import SendRichOpts, send_rich
-from ductor_bot.bot.topic import get_thread_id
+from ductor_bot.bot.topic import get_session_key, get_thread_id
 from ductor_bot.bot.typing import TypingContext
 from ductor_bot.text.response_format import new_session_text, stop_text
 
@@ -86,11 +86,12 @@ async def handle_command(orchestrator: Orchestrator, bot: Bot, message: Message)
     """Route an orchestrator command (e.g. /status, /model)."""
     if not message.text:
         return
-    chat_id = message.chat.id
+    key = get_session_key(message)
+    chat_id = key.chat_id
     thread_id = get_thread_id(message)
     logger.info("Command dispatched cmd=%s", message.text.strip()[:40])
     async with TypingContext(bot, chat_id, thread_id=thread_id):
-        result = await orchestrator.handle_message(chat_id, message.text.strip())
+        result = await orchestrator.handle_message(key, message.text.strip())
     await send_rich(
         bot,
         chat_id,
@@ -106,10 +107,11 @@ async def handle_command(orchestrator: Orchestrator, bot: Bot, message: Message)
 async def handle_new_session(orchestrator: Orchestrator, bot: Bot, message: Message) -> None:
     """Handle /new: reset session."""
     logger.info("Session reset requested")
-    chat_id = message.chat.id
+    key = get_session_key(message)
+    chat_id = key.chat_id
     thread_id = get_thread_id(message)
     async with TypingContext(bot, chat_id, thread_id=thread_id):
-        provider = await orchestrator.reset_active_provider_session(chat_id)
+        provider = await orchestrator.reset_active_provider_session(key)
     await send_rich(
         bot,
         chat_id,

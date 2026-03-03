@@ -634,7 +634,8 @@ class TestForumTopicIndicator:
             acquired.set()
             await release.wait()
 
-        msg1 = _make_message(chat_id=1, text="first")
+        # Both messages must share the same topic so they get the same lock key
+        msg1 = _make_message(chat_id=1, text="first", topic_thread_id=42)
         msg1.message_id = 1
         task1 = asyncio.create_task(mw(slow_handler, msg1, {}))
         await acquired.wait()

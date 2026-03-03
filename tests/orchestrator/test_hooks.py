@@ -16,6 +16,7 @@ from ductor_bot.orchestrator.hooks import (
     MessageHookRegistry,
     every_n_messages,
 )
+from ductor_bot.session.key import SessionKey
 
 # ---------------------------------------------------------------------------
 # Unit tests: HookContext, conditions, registry
@@ -142,10 +143,10 @@ async def test_hook_injects_into_prompt_on_6th_message(orch: Orchestrator) -> No
 
     # Send 5 messages to build up the counter
     for _ in range(5):
-        await normal(orch, 1, "msg")
+        await normal(orch, SessionKey(chat_id=1), "msg")
 
     # 6th message should have the hook injected
-    await normal(orch, 1, "sixth")
+    await normal(orch, SessionKey(chat_id=1), "sixth")
 
     sixth_call = mock_execute.call_args_list[5]
     request = sixth_call[0][0]
@@ -160,7 +161,7 @@ async def test_hook_not_injected_before_6th(orch: Orchestrator) -> None:
     object.__setattr__(orch._cli_service, "execute", mock_execute)
 
     for i in range(5):
-        await normal(orch, 1, f"msg-{i}")
+        await normal(orch, SessionKey(chat_id=1), f"msg-{i}")
         request = mock_execute.call_args_list[i][0][0]
         assert "MEMORY CHECK" not in request.prompt
 
@@ -173,13 +174,13 @@ async def test_hook_resets_on_new_session(orch: Orchestrator) -> None:
 
     # Send 5 messages
     for _ in range(5):
-        await normal(orch, 1, "msg")
+        await normal(orch, SessionKey(chat_id=1), "msg")
 
     # Reset session (simulates /new)
-    await orch._sessions.reset_session(1)
+    await orch._sessions.reset_session(SessionKey(chat_id=1))
 
     # Messages after reset should NOT carry the mainmemory reminder (counter back to 0)
     # (DELEGATION_BRIEF fires on new session, but that's expected and correct)
-    await normal(orch, 1, "after-reset")
+    await normal(orch, SessionKey(chat_id=1), "after-reset")
     last_request = mock_execute.call_args[0][0]
     assert "MEMORY CHECK" not in last_request.prompt

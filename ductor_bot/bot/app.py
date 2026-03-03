@@ -50,7 +50,7 @@ from ductor_bot.bot.message_dispatch import (
 from ductor_bot.bot.middleware import MQ_PREFIX, AuthMiddleware, SequentialMiddleware
 from ductor_bot.bot.sender import SendRichOpts, send_rich
 from ductor_bot.bot.sender import send_files_from_text as _send_files_from_text
-from ductor_bot.bot.topic import get_thread_id
+from ductor_bot.bot.topic import get_session_key, get_thread_id
 from ductor_bot.bot.typing import TypingContext as _TypingContext
 from ductor_bot.bot.welcome import (
     build_welcome_keyboard,
@@ -68,6 +68,7 @@ from ductor_bot.infra.updater import UpdateObserver
 from ductor_bot.infra.version import VersionInfo, get_current_version
 from ductor_bot.log_context import set_log_context
 from ductor_bot.multiagent.bus import AsyncInterAgentResult
+from ductor_bot.session.key import SessionKey
 from ductor_bot.tasks.models import TaskResult
 from ductor_bot.text.response_format import SEP, fmt
 from ductor_bot.workspace.paths import DuctorPaths
@@ -437,6 +438,7 @@ class TelegramBot:
             return True
 
         if text_lower.startswith("/model"):
+            key = get_session_key(message)
             if self._sequential.is_busy(chat_id) or self._orch.is_chat_busy(chat_id):
                 await send_rich(
                     self._bot,
@@ -447,7 +449,7 @@ class TelegramBot:
                     ),
                 )
                 return True
-            async with self._sequential.get_lock(chat_id):
+            async with self._sequential.get_lock(key.lock_key):
                 await handle_command(self._orchestrator, self._bot, message)
             return True
 
@@ -670,6 +672,7 @@ class TelegramBot:
             return
 
         chat_id = msg.chat.id
+        key = get_session_key(msg)
         thread_id = get_thread_id(msg)
         set_log_context(operation="cb", chat_id=chat_id)
         logger.info("Callback data=%s", data[:40])
@@ -683,46 +686,47 @@ class TelegramBot:
                 return
             data = resolved
 
-        if await self._route_special_callback(chat_id, msg.message_id, data, thread_id=thread_id):
+        if await self._route_special_callback(key, msg.message_id, data, thread_id=thread_id):
             return
 
         await self._mark_button_choice(chat_id, msg, display_label)
 
-        async with self._sequential.get_lock(chat_id):
+        async with self._sequential.get_lock(key.lock_key):
             if self._config.streaming.enabled:
-                await self._handle_streaming(msg, chat_id, data, thread_id=thread_id)
+                await self._handle_streaming(msg, key, data, thread_id=thread_id)
             else:
-                await self._handle_non_streaming(msg, chat_id, data, thread_id=thread_id)
+                await self._handle_non_streaming(msg, key, data, thread_id=thread_id)
 
     async def _route_special_callback(
-        self, chat_id: int, message_id: int, data: str, *, thread_id: int | None = None
+        self, key: SessionKey, message_id: int, data: str, *, thread_id: int | None = None
     ) -> bool:
         """Handle known callback namespaces. Returns True when handled."""
-        if await self._route_prefix_callback(chat_id, message_id, data, thread_id=thread_id):
+        if await self._route_prefix_callback(key, message_id, data, thread_id=thread_id):
             return True
 
         from ductor_bot.orchestrator.model_selector import is_model_selector_callback
 
         if is_model_selector_callback(data):
-            await self._handle_model_selector(chat_id, message_id, data)
+            await self._handle_model_selector(key, message_id, data)
             return True
 
         from ductor_bot.orchestrator.cron_selector import is_cron_selector_callback
 
         if is_cron_selector_callback(data):
-            await self._handle_cron_selector(chat_id, message_id, data)
+            await self._handle_cron_selector(key.chat_id, message_id, data)
             return True
 
         if is_file_browser_callback(data):
-            await self._handle_file_browser(chat_id, message_id, data, thread_id=thread_id)
+            await self._handle_file_browser(key, message_id, data, thread_id=thread_id)
             return True
 
         return False
 
     async def _route_prefix_callback(
-        self, chat_id: int, message_id: int, data: str, *, thread_id: int | None = None
+        self, key: SessionKey, message_id: int, data: str, *, thread_id: int | None = None
     ) -> bool:
         """Handle prefix-based callback namespaces. Returns True when handled."""
+        chat_id = key.chat_id
         if data.startswith(MQ_PREFIX):
             await self._handle_queue_cancel(chat_id, data)
             return True
@@ -743,18 +747,18 @@ class TelegramBot:
             return True
 
         if data.startswith("ns:"):
-            await self._handle_ns_callback(chat_id, data, thread_id=thread_id)
+            await self._handle_ns_callback(key, data, thread_id=thread_id)
             return True
 
         return False
 
-    async def _handle_model_selector(self, chat_id: int, message_id: int, data: str) -> None:
+    async def _handle_model_selector(self, key: SessionKey, message_id: int, data: str) -> None:
         """Handle model selector wizard by editing the message in-place."""
         from ductor_bot.orchestrator.model_selector import handle_model_callback
 
-        async with self._sequential.get_lock(chat_id):
-            text, keyboard = await handle_model_callback(self._orch, chat_id, data)
-        await edit_selector_result(self._bot, chat_id, message_id, text, keyboard)
+        async with self._sequential.get_lock(key.lock_key):
+            text, keyboard = await handle_model_callback(self._orch, key, data)
+        await edit_selector_result(self._bot, key.chat_id, message_id, text, keyboard)
 
     async def _handle_cron_selector(self, chat_id: int, message_id: int, data: str) -> None:
         """Handle cron selector wizard by editing the message in-place."""
@@ -783,7 +787,7 @@ class TelegramBot:
         await edit_selector_result(self._bot, chat_id, message_id, text, keyboard)
 
     async def _handle_ns_callback(
-        self, chat_id: int, data: str, *, thread_id: int | None = None
+        self, key: SessionKey, data: str, *, thread_id: int | None = None
     ) -> None:
         """Handle ``ns:<session_name>:<label>`` button callbacks from session results."""
         parsed = parse_ns_callback(data)
@@ -791,20 +795,20 @@ class TelegramBot:
             return
         session_name, label = parsed
 
-        async with self._sequential.get_lock(chat_id):
+        async with self._sequential.get_lock(key.lock_key):
             if self._config.streaming.enabled:
                 from ductor_bot.orchestrator.flows import named_session_streaming
 
-                result = await named_session_streaming(self._orch, chat_id, session_name, label)
+                result = await named_session_streaming(self._orch, key, session_name, label)
             else:
                 from ductor_bot.orchestrator.flows import named_session_flow
 
-                result = await named_session_flow(self._orch, chat_id, session_name, label)
+                result = await named_session_flow(self._orch, key, session_name, label)
 
             if result.text:
                 await send_rich(
                     self._bot,
-                    chat_id,
+                    key.chat_id,
                     result.text,
                     SendRichOpts(
                         allowed_roots=self.file_roots(self._orch.paths),
@@ -813,9 +817,10 @@ class TelegramBot:
                 )
 
     async def _handle_file_browser(
-        self, chat_id: int, message_id: int, data: str, *, thread_id: int | None = None
+        self, key: SessionKey, message_id: int, data: str, *, thread_id: int | None = None
     ) -> None:
         """Handle file browser navigation or file request."""
+        chat_id = key.chat_id
         text, keyboard, prompt = await handle_file_browser_callback(self._orch.paths, data)
 
         if prompt:
@@ -824,7 +829,7 @@ class TelegramBot:
                 await self._bot.edit_message_reply_markup(
                     chat_id=chat_id, message_id=message_id, reply_markup=None
                 )
-            async with self._sequential.get_lock(chat_id):
+            async with self._sequential.get_lock(key.lock_key):
                 if self._config.streaming.enabled:
                     fake_msg = await self._bot.send_message(
                         chat_id,
@@ -832,9 +837,9 @@ class TelegramBot:
                         parse_mode=None,
                         message_thread_id=thread_id,
                     )
-                    await self._handle_streaming(fake_msg, chat_id, prompt, thread_id=thread_id)
+                    await self._handle_streaming(fake_msg, key, prompt, thread_id=thread_id)
                 else:
-                    await self._handle_non_streaming(None, chat_id, prompt, thread_id=thread_id)
+                    await self._handle_non_streaming(None, key, prompt, thread_id=thread_id)
             return
 
         # Directory navigation: edit message in-place
@@ -866,14 +871,14 @@ class TelegramBot:
         if text is None:
             return
 
-        chat_id = message.chat.id
+        key = get_session_key(message)
         thread_id = get_thread_id(message)
         logger.debug("Message text=%s", text[:80])
 
         if self._config.streaming.enabled:
-            await self._handle_streaming(message, chat_id, text, thread_id=thread_id)
+            await self._handle_streaming(message, key, text, thread_id=thread_id)
         else:
-            await self._handle_non_streaming(message, chat_id, text, thread_id=thread_id)
+            await self._handle_non_streaming(message, key, text, thread_id=thread_id)
 
     async def _resolve_text(self, message: Message) -> str | None:
         """Extract processable text from *message* (plain text or media prompt)."""
@@ -897,7 +902,7 @@ class TelegramBot:
         return strip_mention(message.text, self._bot_username)
 
     async def _handle_streaming(
-        self, message: Message, chat_id: int, text: str, *, thread_id: int | None = None
+        self, message: Message, key: SessionKey, text: str, *, thread_id: int | None = None
     ) -> None:
         """Streaming flow: coalescer -> stream editor -> Telegram."""
         await run_streaming_message(
@@ -905,7 +910,7 @@ class TelegramBot:
                 bot=self._bot,
                 orchestrator=self._orch,
                 message=message,
-                chat_id=chat_id,
+                key=key,
                 text=text,
                 streaming_cfg=self._config.streaming,
                 allowed_roots=self.file_roots(self._orch.paths),
@@ -916,7 +921,7 @@ class TelegramBot:
     async def _handle_non_streaming(
         self,
         reply_to: Message | None,
-        chat_id: int,
+        key: SessionKey,
         text: str,
         *,
         thread_id: int | None = None,
@@ -926,7 +931,7 @@ class TelegramBot:
             NonStreamingDispatch(
                 bot=self._bot,
                 orchestrator=self._orch,
-                chat_id=chat_id,
+                key=key,
                 text=text,
                 allowed_roots=self.file_roots(self._orch.paths),
                 reply_to=reply_to,

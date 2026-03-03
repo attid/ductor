@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ductor_bot.cli.codex_cache import CodexModelCache
     from ductor_bot.orchestrator.core import Orchestrator
     from ductor_bot.session import SessionData
+    from ductor_bot.session.key import SessionKey
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ def is_model_selector_callback(data: str) -> bool:
 
 async def model_selector_start(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     """Build the initial ``/model`` response with provider buttons.
 
@@ -146,7 +147,7 @@ async def model_selector_start(
     auth = await asyncio.to_thread(check_all_auth)
     authed = [name for name, res in auth.items() if res.status == AuthStatus.AUTHENTICATED]
 
-    header = await _status_line(orch, chat_id)
+    header = await _status_line(orch, key)
 
     if not authed:
         return (
@@ -177,7 +178,7 @@ async def model_selector_start(
 
 async def handle_model_callback(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     data: str,
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     """Route an ``ms:*`` callback to the correct wizard step.
@@ -195,18 +196,18 @@ async def handle_model_callback(
     )
 
     if action == "p":
-        return await _build_model_step(payload, await _status_line(orch, chat_id), codex_cache)
+        return await _build_model_step(payload, await _status_line(orch, key), codex_cache)
 
     if action == "m":
-        return await _handle_model_selected(orch, chat_id, payload, codex_cache)
+        return await _handle_model_selected(orch, key, payload, codex_cache)
 
     if action == "r":
-        return await _handle_reasoning_selected(orch, chat_id, effort=payload, model_id=extra)
+        return await _handle_reasoning_selected(orch, key, effort=payload, model_id=extra)
 
     if action == "b":
         if payload == "root":
-            return await model_selector_start(orch, chat_id)
-        return await _build_model_step(payload, await _status_line(orch, chat_id), codex_cache)
+            return await model_selector_start(orch, key)
+        return await _build_model_step(payload, await _status_line(orch, key), codex_cache)
 
     logger.warning("Unknown model selector callback: %s", data)
     return "Unknown action.", None
@@ -214,7 +215,7 @@ async def handle_model_callback(
 
 async def switch_model(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     model_id: str,
     *,
     reasoning_effort: str | None = None,
@@ -234,14 +235,14 @@ async def switch_model(
     new_provider = orch._models.provider_for(model_id)
     provider_changed = old_provider != new_provider
 
-    active_session = await orch._sessions.get_active(chat_id)
+    active_session = await orch._sessions.get_active(key)
     resume_session_id, resume_message_count = _resume_state_for_provider(
         active_session,
         new_provider,
     )
 
     if not same_model:
-        await orch._process_registry.kill_all(chat_id)
+        await orch._process_registry.kill_all(key.chat_id)
         if active_session is not None:
             await orch._sessions.sync_session_target(
                 active_session,
@@ -296,9 +297,9 @@ async def switch_model(
 # ---------------------------------------------------------------------------
 
 
-async def _status_line(orch: Orchestrator, chat_id: int) -> str:
+async def _status_line(orch: Orchestrator, key: SessionKey) -> str:
     """Current model + reasoning effort as a short header."""
-    session = await orch._sessions.get_active(chat_id)
+    session = await orch._sessions.get_active(key)
     if session:
         model = session.model
         provider = session.provider
@@ -378,7 +379,7 @@ async def _build_model_step(
 
 async def _handle_model_selected(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     model_id: str,
     codex_cache: CodexModelCache | None = None,
 ) -> tuple[str, InlineKeyboardMarkup | None]:
@@ -386,7 +387,7 @@ async def _handle_model_selected(
     provider = orch._models.provider_for(model_id)
 
     if provider in ("claude", "gemini"):
-        result = await switch_model(orch, chat_id, model_id)
+        result = await switch_model(orch, key, model_id)
         return result, None
 
     # Use cache instead of live discovery
@@ -407,17 +408,17 @@ async def _handle_model_selected(
         ]
     )
 
-    header = await _status_line(orch, chat_id)
+    header = await _status_line(orch, key)
     return f"{header}\n\nThinking level for {model_id}:", keyboard
 
 
 async def _handle_reasoning_selected(
     orch: Orchestrator,
-    chat_id: int,
+    key: SessionKey,
     *,
     effort: str,
     model_id: str,
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     """Handle a reasoning effort button press. Final step: switch model + effort."""
-    result = await switch_model(orch, chat_id, model_id, reasoning_effort=effort)
+    result = await switch_model(orch, key, model_id, reasoning_effort=effort)
     return result, None

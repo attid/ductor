@@ -11,6 +11,7 @@ from ductor_bot.bot.sender import SendRichOpts, send_rich
 from ductor_bot.bot.typing import TypingContext
 from ductor_bot.log_context import set_log_context
 from ductor_bot.multiagent.bus import AsyncInterAgentResult
+from ductor_bot.session.key import SessionKey
 from ductor_bot.tasks.models import TaskResult
 from ductor_bot.text.response_format import SEP, fmt
 
@@ -188,9 +189,10 @@ async def handle_webhook_wake(bot: TelegramBot, chat_id: int, prompt: str) -> st
     sends the response to Telegram like a normal message.
     """
     set_log_context(operation="wh", chat_id=chat_id)
-    lock = bot.sequential.get_lock(chat_id)
+    key = SessionKey(chat_id=chat_id)
+    lock = bot.sequential.get_lock(key.lock_key)
     async with lock:
-        result = await bot._orch.handle_message(chat_id, prompt)
+        result = await bot._orch.handle_message(key, prompt)
     roots = bot.file_roots(bot._orch.paths)
     await send_rich(bot.bot_instance, chat_id, result.text, SendRichOpts(allowed_roots=roots))
     return result.text

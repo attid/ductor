@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.cli.types import AgentRequest
 from ductor_bot.orchestrator.flows import _update_session
+from ductor_bot.session.key import SessionKey
 from ductor_bot.session.named import NamedSession
 
 if TYPE_CHECKING:
@@ -38,7 +39,7 @@ async def _inject_prompt(
     Shared by ``handle_async_interagent_result``, ``handle_task_result``,
     and ``handle_task_question``.
     """
-    active = await orch._sessions.get_active(chat_id)
+    active = await orch._sessions.get_active(SessionKey(chat_id=chat_id))
     resume_id = active.session_id if active else None
 
     request = AgentRequest(

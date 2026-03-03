@@ -13,6 +13,7 @@ from ductor_bot.text.response_format import SEP, fmt
 
 if TYPE_CHECKING:
     from ductor_bot.orchestrator.core import Orchestrator
+    from ductor_bot.session.key import SessionKey
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ _STATUS_EMOJI = {
 }
 
 
-async def cmd_agents(orch: Orchestrator, _chat_id: int, _text: str) -> OrchestratorResult:
+async def cmd_agents(orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /agents: list all agents with status."""
     supervisor = orch.supervisor
     if supervisor is None:
@@ -58,7 +59,7 @@ async def cmd_agents(orch: Orchestrator, _chat_id: int, _text: str) -> Orchestra
     return OrchestratorResult(text=fmt("**Agents**", SEP, "\n".join(lines)))
 
 
-async def cmd_agent_stop(orch: Orchestrator, _chat_id: int, text: str) -> OrchestratorResult:
+async def cmd_agent_stop(orch: Orchestrator, _key: SessionKey, text: str) -> OrchestratorResult:
     """Handle /agent_stop <name>: stop a sub-agent."""
     supervisor = orch.supervisor
     if supervisor is None:
@@ -79,7 +80,7 @@ async def cmd_agent_stop(orch: Orchestrator, _chat_id: int, text: str) -> Orches
     return OrchestratorResult(text=f"Agent '{name}' stopped.")
 
 
-async def cmd_agent_start(orch: Orchestrator, _chat_id: int, text: str) -> OrchestratorResult:
+async def cmd_agent_start(orch: Orchestrator, _key: SessionKey, text: str) -> OrchestratorResult:
     """Handle /agent_start <name>: start a sub-agent from the registry."""
     supervisor = orch.supervisor
     if supervisor is None:
@@ -94,7 +95,7 @@ async def cmd_agent_start(orch: Orchestrator, _chat_id: int, text: str) -> Orche
     return OrchestratorResult(text=result)
 
 
-async def cmd_agent_restart(orch: Orchestrator, _chat_id: int, text: str) -> OrchestratorResult:
+async def cmd_agent_restart(orch: Orchestrator, _key: SessionKey, text: str) -> OrchestratorResult:
     """Handle /agent_restart <name>: restart a sub-agent."""
     supervisor = orch.supervisor
     if supervisor is None:

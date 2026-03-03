@@ -13,8 +13,11 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ductor_bot.orchestrator.core import Orchestrator
+    from ductor_bot.session.key import SessionKey
 
-CommandHandler = Callable[["Orchestrator", int, str], Awaitable["OrchestratorResult | None"]]
+CommandHandler = Callable[
+    ["Orchestrator", "SessionKey", str], Awaitable["OrchestratorResult | None"]
+]
 
 
 class OrchestratorResult(BaseModel):
@@ -49,7 +52,7 @@ class CommandRegistry:
         self,
         cmd: str,
         orch: Orchestrator,
-        chat_id: int,
+        key: SessionKey,
         text: str,
     ) -> OrchestratorResult | None:
         """Dispatch *cmd* to a registered handler. Returns None if unknown."""
@@ -57,8 +60,8 @@ class CommandRegistry:
             if entry.match_prefix:
                 if cmd.startswith(entry.name):
                     logger.debug("Command matched cmd=%s", entry.name)
-                    return await entry.handler(orch, chat_id, text)
+                    return await entry.handler(orch, key, text)
             elif cmd == entry.name:
                 logger.debug("Command matched cmd=%s", entry.name)
-                return await entry.handler(orch, chat_id, text)
+                return await entry.handler(orch, key, text)
         return None

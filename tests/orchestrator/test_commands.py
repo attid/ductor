@@ -14,6 +14,7 @@ from ductor_bot.orchestrator.commands import (
     cmd_status,
 )
 from ductor_bot.orchestrator.core import Orchestrator
+from ductor_bot.session.key import SessionKey
 
 # -- cmd_model (wizard + direct switch) --
 
@@ -25,7 +26,7 @@ _AUTHED = {
 
 async def test_model_list_returns_keyboard(orch: Orchestrator) -> None:
     with patch("ductor_bot.orchestrator.model_selector.check_all_auth", return_value=_AUTHED):
-        result = await cmd_model(orch, 1, "/model")
+        result = await cmd_model(orch, SessionKey(chat_id=1), "/model")
     assert result.reply_markup is not None
     assert "Model Selector" in result.text
 
@@ -33,7 +34,7 @@ async def test_model_list_returns_keyboard(orch: Orchestrator) -> None:
 async def test_model_direct_switch(orch: Orchestrator) -> None:
     kill_mock = AsyncMock(return_value=0)
     object.__setattr__(orch._process_registry, "kill_all", kill_mock)
-    result = await cmd_model(orch, 1, "/model sonnet")
+    result = await cmd_model(orch, SessionKey(chat_id=1), "/model sonnet")
     assert "opus" in result.text
     assert "sonnet" in result.text
     assert orch._config.model == "sonnet"
@@ -41,19 +42,19 @@ async def test_model_direct_switch(orch: Orchestrator) -> None:
 
 
 async def test_model_already_set(orch: Orchestrator) -> None:
-    result = await cmd_model(orch, 1, "/model opus")
+    result = await cmd_model(orch, SessionKey(chat_id=1), "/model opus")
     assert "Already running" in result.text
 
 
 async def test_model_provider_change(orch: Orchestrator) -> None:
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    result = await cmd_model(orch, 1, "/model o3")
+    result = await cmd_model(orch, SessionKey(chat_id=1), "/model o3")
     assert "Provider:" in result.text
 
 
 async def test_model_switch_persists_to_config(orch: Orchestrator) -> None:
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    await cmd_model(orch, 1, "/model sonnet")
+    await cmd_model(orch, SessionKey(chat_id=1), "/model sonnet")
     saved = json.loads(orch.paths.config_path.read_text(encoding="utf-8"))
     assert saved["model"] == "sonnet"
     assert saved["provider"] == "claude"
@@ -61,7 +62,7 @@ async def test_model_switch_persists_to_config(orch: Orchestrator) -> None:
 
 async def test_model_provider_change_persists_to_config(orch: Orchestrator) -> None:
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    await cmd_model(orch, 1, "/model o3")
+    await cmd_model(orch, SessionKey(chat_id=1), "/model o3")
     saved = json.loads(orch.paths.config_path.read_text(encoding="utf-8"))
     assert saved["model"] == "o3"
     assert saved["provider"] == "codex"
@@ -70,7 +71,7 @@ async def test_model_provider_change_persists_to_config(orch: Orchestrator) -> N
 async def test_model_same_provider_does_not_show_reset(orch: Orchestrator) -> None:
     kill_mock = AsyncMock(return_value=0)
     object.__setattr__(orch._process_registry, "kill_all", kill_mock)
-    result = await cmd_model(orch, 1, "/model sonnet")
+    result = await cmd_model(orch, SessionKey(chat_id=1), "/model sonnet")
     assert "Session reset" not in result.text
     assert "Provider:" not in result.text
     kill_mock.assert_called_once_with(1)
@@ -81,23 +82,25 @@ async def test_model_same_provider_does_not_show_reset(orch: Orchestrator) -> No
 
 async def test_status_no_session(orch: Orchestrator) -> None:
     with patch("ductor_bot.orchestrator.commands.check_all_auth", return_value={}):
-        result = await cmd_status(orch, 1, "/status")
+        result = await cmd_status(orch, SessionKey(chat_id=1), "/status")
     assert "No active session" in result.text
     assert "opus" in result.text
 
 
 async def test_status_with_session(orch: Orchestrator) -> None:
-    await orch._sessions.resolve_session(1)
+    await orch._sessions.resolve_session(SessionKey(chat_id=1))
     with patch("ductor_bot.orchestrator.commands.check_all_auth", return_value={}):
-        result = await cmd_status(orch, 1, "/status")
+        result = await cmd_status(orch, SessionKey(chat_id=1), "/status")
     assert "Session:" in result.text
     assert "Messages:" in result.text
 
 
 async def test_status_prefers_session_model_over_config(orch: Orchestrator) -> None:
-    await orch._sessions.resolve_session(1, provider="codex", model="gpt-5.2-codex")
+    await orch._sessions.resolve_session(
+        SessionKey(chat_id=1), provider="codex", model="gpt-5.2-codex"
+    )
     with patch("ductor_bot.orchestrator.commands.check_all_auth", return_value={}):
-        result = await cmd_status(orch, 1, "/status")
+        result = await cmd_status(orch, SessionKey(chat_id=1), "/status")
     assert "Model: gpt-5.2-codex (configured: opus)" in result.text
 
 
@@ -106,13 +109,13 @@ async def test_status_prefers_session_model_over_config(orch: Orchestrator) -> N
 
 async def test_memory_shows_content(orch: Orchestrator) -> None:
     orch.paths.mainmemory_path.write_text("# My Memories\n- Learned X")
-    result = await cmd_memory(orch, 0, "/memory")
+    result = await cmd_memory(orch, SessionKey(chat_id=0), "/memory")
     assert "My Memories" in result.text
 
 
 async def test_memory_empty(orch: Orchestrator) -> None:
     orch.paths.mainmemory_path.write_text("")
-    result = await cmd_memory(orch, 0, "/memory")
+    result = await cmd_memory(orch, SessionKey(chat_id=0), "/memory")
     assert "empty" in result.text.lower()
 
 
@@ -120,7 +123,7 @@ async def test_memory_empty(orch: Orchestrator) -> None:
 
 
 async def test_cron_no_jobs(orch: Orchestrator) -> None:
-    result = await cmd_cron(orch, 0, "/cron")
+    result = await cmd_cron(orch, SessionKey(chat_id=0), "/cron")
     assert "No cron jobs" in result.text
 
 
@@ -137,7 +140,7 @@ async def test_cron_lists_jobs(orch: Orchestrator) -> None:
             task_folder="test-task",
         ),
     )
-    result = await cmd_cron(orch, 0, "/cron")
+    result = await cmd_cron(orch, SessionKey(chat_id=0), "/cron")
     assert result.reply_markup is not None
     assert "0 9 * * *" in result.text
     assert "Test Job" in result.text
@@ -148,7 +151,7 @@ async def test_cron_lists_jobs(orch: Orchestrator) -> None:
 
 
 async def test_diagnose_no_logs(orch: Orchestrator) -> None:
-    result = await cmd_diagnose(orch, 0, "/diagnose")
+    result = await cmd_diagnose(orch, SessionKey(chat_id=0), "/diagnose")
     assert "Diagnostics" in result.text
     assert "No log file" in result.text
 
@@ -156,7 +159,7 @@ async def test_diagnose_no_logs(orch: Orchestrator) -> None:
 async def test_diagnose_with_logs(orch: Orchestrator) -> None:
     log_path = orch.paths.logs_dir / "agent.log"
     log_path.write_text("2024-01-01 INFO Started\n2024-01-01 ERROR Something broke\n")
-    result = await cmd_diagnose(orch, 0, "/diagnose")
+    result = await cmd_diagnose(orch, SessionKey(chat_id=0), "/diagnose")
     assert "Something broke" in result.text
 
 
@@ -188,7 +191,7 @@ async def test_diagnose_shows_cache_status(orch: Orchestrator) -> None:
     mock_observer.get_cache = MagicMock(return_value=mock_cache)
     orch._observers.codex_cache_obs = mock_observer
 
-    result = await cmd_diagnose(orch, 0, "/diagnose")
+    result = await cmd_diagnose(orch, SessionKey(chat_id=0), "/diagnose")
 
     # Verify cache info is in output
     assert "Codex Model Cache" in result.text
@@ -199,7 +202,7 @@ async def test_diagnose_shows_cache_status(orch: Orchestrator) -> None:
 async def test_diagnose_shows_effective_runtime_target(orch: Orchestrator) -> None:
     object.__setattr__(orch, "_available_providers", frozenset({"codex"}))
 
-    result = await cmd_diagnose(orch, 0, "/diagnose")
+    result = await cmd_diagnose(orch, SessionKey(chat_id=0), "/diagnose")
 
     assert "Configured: claude / opus" in result.text
     assert "Effective runtime: claude / opus" in result.text
@@ -211,7 +214,7 @@ async def test_diagnose_shows_effective_runtime_target(orch: Orchestrator) -> No
 async def test_model_unknown_name(orch: Orchestrator) -> None:
     """Unknown model names are treated as codex models and the switch succeeds."""
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    result = await cmd_model(orch, 1, "/model totally_fake_model")
+    result = await cmd_model(orch, SessionKey(chat_id=1), "/model totally_fake_model")
     assert "Model switched" in result.text
     assert "totally_fake_model" in result.text
     assert orch._config.model == "totally_fake_model"

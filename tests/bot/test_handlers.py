@@ -160,7 +160,9 @@ class TestHandleNewSession:
 
         msg = _make_message(chat_id=1, text="/new")
         await handle_new_session(orchestrator, bot, msg)
-        orchestrator.reset_active_provider_session.assert_called_once_with(1)
+        from ductor_bot.session.key import SessionKey
+
+        orchestrator.reset_active_provider_session.assert_called_once_with(SessionKey(chat_id=1))
 
 
 class TestStripMention:

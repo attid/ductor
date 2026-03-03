@@ -14,10 +14,12 @@ from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.orchestrator.hooks import MessageHook
 from ductor_bot.orchestrator.registry import OrchestratorResult
 from ductor_bot.session import SessionManager
+from ductor_bot.session.key import SessionKey
 from ductor_bot.workspace.init import init_workspace
 from ductor_bot.workspace.paths import DuctorPaths
 
 CHAT_ID = 12345
+KEY = SessionKey(chat_id=CHAT_ID)
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +133,7 @@ class TestNormalMessageFlow:
     ) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        result = await orch.handle_message(CHAT_ID, "What is the weather?")
+        result = await orch.handle_message(KEY, "What is the weather?")
 
         assert isinstance(result, OrchestratorResult)
         assert result.text == "Hello from the agent!"
@@ -142,9 +144,9 @@ class TestNormalMessageFlow:
     ) -> None:
         orch, _ = orch_with_mock_cli
 
-        await orch.handle_message(CHAT_ID, "Hello")
+        await orch.handle_message(KEY, "Hello")
 
-        session = await orch._sessions.get_active(CHAT_ID)
+        session = await orch._sessions.get_active(KEY)
         assert session is not None
         assert session.chat_id == CHAT_ID
         assert session.message_count == 1
@@ -154,18 +156,18 @@ class TestNormalMessageFlow:
     ) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        await orch.handle_message(CHAT_ID, "First message")
+        await orch.handle_message(KEY, "First message")
 
         mock_execute.reset_mock()
         mock_execute.return_value = _make_agent_response(result="Second reply")
 
-        await orch.handle_message(CHAT_ID, "Second message")
+        await orch.handle_message(KEY, "Second message")
 
         call_args = mock_execute.call_args
         request = call_args[0][0]
         assert request.resume_session == "sess-abc-123"
 
-        session = await orch._sessions.get_active(CHAT_ID)
+        session = await orch._sessions.get_active(KEY)
         assert session is not None
         assert session.message_count == 2
 
@@ -175,9 +177,9 @@ class TestNormalMessageFlow:
         orch, mock_execute = orch_with_mock_cli
         mock_execute.return_value = _make_agent_response(cost=0.05, tokens=1000)
 
-        await orch.handle_message(CHAT_ID, "Expensive query")
+        await orch.handle_message(KEY, "Expensive query")
 
-        session = await orch._sessions.get_active(CHAT_ID)
+        session = await orch._sessions.get_active(KEY)
         assert session is not None
         assert session.total_cost_usd == pytest.approx(0.05)
         assert session.total_tokens == 1000
@@ -193,7 +195,7 @@ class TestCommandRouting:
         orch, mock_execute = orch_with_mock_cli
 
         with patch("ductor_bot.orchestrator.commands.check_all_auth", return_value={}):
-            result = await orch.handle_message(CHAT_ID, "/status")
+            result = await orch.handle_message(KEY, "/status")
 
         assert "**Status**" in result.text
         mock_execute.assert_not_awaited()
@@ -201,7 +203,7 @@ class TestCommandRouting:
     async def test_memory_command(self, orch_with_mock_cli: tuple[Orchestrator, AsyncMock]) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        result = await orch.handle_message(CHAT_ID, "/memory")
+        result = await orch.handle_message(KEY, "/memory")
 
         assert "**Main Memory**" in result.text
         mock_execute.assert_not_awaited()
@@ -227,7 +229,7 @@ class TestCommandRouting:
             new_callable=AsyncMock,
             return_value=("Select a provider:", MagicMock()),
         ):
-            result = await orch.handle_message(CHAT_ID, "/model")
+            result = await orch.handle_message(KEY, "/model")
 
         assert "Select a provider" in result.text
         mock_execute.assert_not_awaited()
@@ -237,7 +239,7 @@ class TestCommandRouting:
     ) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        result = await orch.handle_message(CHAT_ID, "/cron")
+        result = await orch.handle_message(KEY, "/cron")
 
         assert "No cron jobs" in result.text
         mock_execute.assert_not_awaited()
@@ -247,7 +249,7 @@ class TestCommandRouting:
     ) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        result = await orch.handle_message(CHAT_ID, "/nonexistent")
+        result = await orch.handle_message(KEY, "/nonexistent")
 
         mock_execute.assert_awaited_once()
         assert result.text == "Hello from the agent!"
@@ -264,17 +266,17 @@ class TestNewSessionFlow:
     ) -> None:
         orch, _mock_execute = orch_with_mock_cli
 
-        await orch.handle_message(CHAT_ID, "Build something")
+        await orch.handle_message(KEY, "Build something")
 
-        session_before = await orch._sessions.get_active(CHAT_ID)
+        session_before = await orch._sessions.get_active(KEY)
         assert session_before is not None
         assert session_before.session_id == "sess-abc-123"
 
-        result = await orch.handle_message(CHAT_ID, "/new")
+        result = await orch.handle_message(KEY, "/new")
 
         assert "Session Reset" in result.text
 
-        session_after = await orch._sessions.get_active(CHAT_ID)
+        session_after = await orch._sessions.get_active(KEY)
         assert session_after is not None
         assert session_after.session_id == ""
         assert session_after.message_count == 0
@@ -284,12 +286,12 @@ class TestNewSessionFlow:
     ) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        await orch.handle_message(CHAT_ID, "/new")
+        await orch.handle_message(KEY, "/new")
 
         mock_execute.reset_mock()
         mock_execute.return_value = _make_agent_response(result="Fresh start!")
 
-        await orch.handle_message(CHAT_ID, "After reset")
+        await orch.handle_message(KEY, "After reset")
 
         request = mock_execute.call_args[0][0]
         assert request.resume_session is None
@@ -306,7 +308,7 @@ class TestDirectiveParsing:
     ) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        await orch.handle_message(CHAT_ID, "@sonnet explain this code")
+        await orch.handle_message(KEY, "@sonnet explain this code")
 
         request = mock_execute.call_args[0][0]
         assert request.model_override == "sonnet"
@@ -317,7 +319,7 @@ class TestDirectiveParsing:
     ) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        result = await orch.handle_message(CHAT_ID, "@opus")
+        result = await orch.handle_message(KEY, "@opus")
 
         assert "Next message will use" in result.text
         assert "opus" in result.text
@@ -328,7 +330,7 @@ class TestDirectiveParsing:
     ) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        await orch.handle_message(CHAT_ID, "@unknown hello")
+        await orch.handle_message(KEY, "@unknown hello")
 
         request = mock_execute.call_args[0][0]
         assert request.model_override is None or request.model_override == "opus"
@@ -338,7 +340,7 @@ class TestDirectiveParsing:
     ) -> None:
         orch, mock_execute = orch_with_mock_cli
 
-        await orch.handle_message(CHAT_ID, "Send email to @sonnet please")
+        await orch.handle_message(KEY, "Send email to @sonnet please")
 
         request = mock_execute.call_args[0][0]
         assert request.model_override is None or request.model_override == "opus"
@@ -357,7 +359,7 @@ class TestHookApplication:
 
         for i in range(6):
             mock_execute.return_value = _make_agent_response(result=f"Reply {i}")
-            await orch.handle_message(CHAT_ID, f"Message {i}")
+            await orch.handle_message(KEY, f"Message {i}")
 
         sixth_call = mock_execute.call_args_list[5]
         prompt = sixth_call[0][0].prompt
@@ -370,7 +372,7 @@ class TestHookApplication:
 
         for i in range(5):
             mock_execute.return_value = _make_agent_response(result=f"Reply {i}")
-            await orch.handle_message(CHAT_ID, f"Message {i}")
+            await orch.handle_message(KEY, f"Message {i}")
 
         for call in mock_execute.call_args_list:
             prompt = call[0][0].prompt
@@ -388,7 +390,7 @@ class TestHookApplication:
         )
         orch._hook_registry.register(custom_hook)
 
-        await orch.handle_message(CHAT_ID, "Test message")
+        await orch.handle_message(KEY, "Test message")
 
         prompt = mock_execute.call_args[0][0].prompt
         assert "[CUSTOM SUFFIX]" in prompt
@@ -413,9 +415,9 @@ class TestErrorRecovery:
 
         mock_execute.side_effect = [first_resp, error_resp, success_resp]
 
-        await orch.handle_message(CHAT_ID, "Setup message")
-        first_result = await orch.handle_message(CHAT_ID, "Flaky request")
-        second_result = await orch.handle_message(CHAT_ID, "Retry request")
+        await orch.handle_message(KEY, "Setup message")
+        first_result = await orch.handle_message(KEY, "Flaky request")
+        second_result = await orch.handle_message(KEY, "Retry request")
 
         assert "Session Error" in first_result.text
         assert second_result.text == "Recovered!"
@@ -430,12 +432,12 @@ class TestErrorRecovery:
         error_resp = _make_agent_response(result="", is_error=True)
         mock_execute.side_effect = [setup_resp, error_resp]
 
-        await orch.handle_message(CHAT_ID, "Setup message")
-        result = await orch.handle_message(CHAT_ID, "Broken request")
+        await orch.handle_message(KEY, "Setup message")
+        result = await orch.handle_message(KEY, "Broken request")
 
         assert "Session Error" in result.text
 
-        session = await orch._sessions.get_active(CHAT_ID)
+        session = await orch._sessions.get_active(KEY)
         assert session is not None
         assert session.session_id == "sess-keep"
         assert session.message_count == 1
@@ -446,7 +448,7 @@ class TestErrorRecovery:
         orch, mock_execute = orch_with_mock_cli
         mock_execute.side_effect = RuntimeError("subprocess exploded")
 
-        result = await orch.handle_message(CHAT_ID, "Crash test")
+        result = await orch.handle_message(KEY, "Crash test")
 
         assert "internal error" in result.text.lower()
 
@@ -478,7 +480,7 @@ class TestStreamingFlow:
             deltas.append(text)
 
         result = await orch.handle_message_streaming(
-            CHAT_ID,
+            KEY,
             "Stream this",
             on_text_delta=on_delta,
         )
@@ -496,7 +498,7 @@ class TestStreamingFlow:
 
         mock_streaming.return_value = _make_agent_response(result="", is_error=True)
 
-        result = await orch.handle_message_streaming(CHAT_ID, "Broken stream")
+        result = await orch.handle_message_streaming(KEY, "Broken stream")
 
         assert "Session Error" in result.text
 
@@ -513,7 +515,7 @@ class TestStreamingFlow:
             tools.append(name)
 
         await orch.handle_message_streaming(
-            CHAT_ID,
+            KEY,
             "Use a tool",
             on_tool_activity=on_tool,
         )
@@ -534,13 +536,13 @@ class TestSessionPersistence:
         paths, config = workspace
 
         mgr1 = SessionManager(paths.sessions_path, config)
-        session, is_new = await mgr1.resolve_session(CHAT_ID, provider="claude")
+        session, is_new = await mgr1.resolve_session(KEY, provider="claude")
         assert is_new
         session.session_id = "persistent-sess"
         await mgr1.update_session(session, cost_usd=0.1, tokens=200)
 
         mgr2 = SessionManager(paths.sessions_path, config)
-        session2, is_new2 = await mgr2.resolve_session(CHAT_ID, provider="claude")
+        session2, is_new2 = await mgr2.resolve_session(KEY, provider="claude")
 
         assert not is_new2
         assert session2.session_id == "persistent-sess"
@@ -551,7 +553,7 @@ class TestSessionPersistence:
         paths, config = workspace
 
         mgr = SessionManager(paths.sessions_path, config)
-        await mgr.resolve_session(CHAT_ID, provider="claude")
+        await mgr.resolve_session(KEY, provider="claude")
 
         raw = paths.sessions_path.read_text(encoding="utf-8")
         data = json.loads(raw)
@@ -573,13 +575,13 @@ class TestFullRoundTrip:
         resp2 = _make_agent_response(result="Second reply", session_id="sess-001", cost=0.03)
         mock_execute.side_effect = [resp1, resp2]
 
-        r1 = await orch.handle_message(CHAT_ID, "Hello agent")
+        r1 = await orch.handle_message(KEY, "Hello agent")
         assert r1.text == "First reply"
 
-        r2 = await orch.handle_message(CHAT_ID, "Follow up")
+        r2 = await orch.handle_message(KEY, "Follow up")
         assert r2.text == "Second reply"
 
-        session = await orch._sessions.get_active(CHAT_ID)
+        session = await orch._sessions.get_active(KEY)
         assert session is not None
         assert session.message_count == 2
         assert session.total_cost_usd == pytest.approx(0.05)
@@ -596,7 +598,7 @@ class TestFullRoundTrip:
         memory_text = "User likes Python and espresso."
         orch.paths.mainmemory_path.write_text(memory_text, encoding="utf-8")
 
-        await orch.handle_message(CHAT_ID, "First message")
+        await orch.handle_message(KEY, "First message")
 
         request = mock_execute.call_args[0][0]
         assert request.append_system_prompt == memory_text
@@ -608,12 +610,12 @@ class TestFullRoundTrip:
 
         orch.paths.mainmemory_path.write_text("Some memory", encoding="utf-8")
 
-        await orch.handle_message(CHAT_ID, "First")
+        await orch.handle_message(KEY, "First")
 
         mock_execute.reset_mock()
         mock_execute.return_value = _make_agent_response(result="Second")
 
-        await orch.handle_message(CHAT_ID, "Second")
+        await orch.handle_message(KEY, "Second")
 
         request = mock_execute.call_args[0][0]
         assert request.append_system_prompt is None

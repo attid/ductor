@@ -53,6 +53,7 @@ from ductor_bot.files.tags import (
 )
 from ductor_bot.log_context import set_log_context
 from ductor_bot.security.paths import is_path_safe
+from ductor_bot.session.key import SessionKey
 
 if TYPE_CHECKING:
     from ductor_bot.config import ApiConfig
@@ -173,7 +174,7 @@ class ApiServer:
         self._handle_message: StreamingMessageHandler | None = None
         self._handle_abort: AbortHandler | None = None
         self._runner: web.AppRunner | None = None
-        self._locks: dict[int, asyncio.Lock] = {}
+        self._locks: dict[tuple[int, int | None], asyncio.Lock] = {}
         self._active_ws: set[web.WebSocketResponse] = set()
         # File context (set via set_file_context)
         self._allowed_roots: Sequence[Path] | None = None
@@ -373,17 +374,17 @@ class ApiServer:
         if auth_result is None:
             return ws
 
-        chat_id, e2e = auth_result
+        key, e2e = auth_result
         channel = _SecureChannel(ws, e2e)
 
         self._active_ws.add(ws)
         try:
-            await self._session_loop(channel, chat_id)
+            await self._session_loop(channel, key)
         except asyncio.CancelledError:
             pass
         finally:
             self._active_ws.discard(ws)
-            logger.info("API WebSocket closed chat_id=%d", chat_id)
+            logger.info("API WebSocket closed key=%s", key.storage_key)
 
         return ws
 
@@ -414,8 +415,8 @@ class ApiServer:
     async def _authenticate(
         self,
         ws: web.WebSocketResponse,
-    ) -> tuple[int, E2ESession] | None:
-        """Wait for auth + E2E key exchange.  Returns (chat_id, e2e) or None."""
+    ) -> tuple[SessionKey, E2ESession] | None:
+        """Wait for auth + E2E key exchange.  Returns (key, e2e) or None."""
         data = await self._read_auth_message(ws)
         if data is None:
             return None
@@ -444,6 +445,13 @@ class ApiServer:
         if not isinstance(chat_id, int) or chat_id <= 0:
             chat_id = self._default_chat_id
 
+        # Optional channel_id for per-channel session isolation (maps to topic_id)
+        channel_id = data.get("channel_id")
+        if not isinstance(channel_id, int) or channel_id <= 0:
+            channel_id = None
+
+        key = SessionKey(chat_id=chat_id, topic_id=channel_id)
+
         # Last plaintext message -- everything after this is E2E encrypted
         auth_ok_payload: dict[str, object] = {
             "type": "auth_ok",
@@ -451,28 +459,30 @@ class ApiServer:
             "e2e_pk": e2e.local_pk_b64,
             "providers": self._provider_info,
         }
+        if channel_id is not None:
+            auth_ok_payload["channel_id"] = channel_id
         if self._active_state_getter:
             active_provider, active_model = self._active_state_getter()
             auth_ok_payload["active_provider"] = active_provider
             auth_ok_payload["active_model"] = active_model
         await _ws_send(ws, auth_ok_payload)
-        logger.info("API client authenticated chat_id=%d (E2E)", chat_id)
-        return chat_id, e2e
+        logger.info("API client authenticated key=%s (E2E)", key.storage_key)
+        return key, e2e
 
     # -- Session loop ----------------------------------------------------------
 
     async def _session_loop(
         self,
         channel: _SecureChannel,
-        chat_id: int,
+        key: SessionKey,
     ) -> None:
         """Read encrypted messages from the client and dispatch them sequentially."""
-        lock = self._locks.setdefault(chat_id, asyncio.Lock())
-        set_log_context(operation="api", chat_id=chat_id)
+        lock = self._locks.setdefault(key.lock_key, asyncio.Lock())
+        set_log_context(operation="api", chat_id=key.chat_id)
 
         async for raw in channel.ws:
             if raw.type == WSMsgType.TEXT:
-                await self._route_text_message(channel, raw.data, chat_id, lock)
+                await self._route_text_message(channel, raw.data, key, lock)
             elif raw.type in (WSMsgType.ERROR, WSMsgType.CLOSE):
                 break
 
@@ -480,14 +490,14 @@ class ApiServer:
         self,
         channel: _SecureChannel,
         raw_data: str,
-        chat_id: int,
+        key: SessionKey,
         lock: asyncio.Lock,
     ) -> None:
         """Decrypt and route a single encrypted text frame."""
         try:
             data = channel.decrypt(raw_data)
         except Exception:
-            logger.warning("E2E decryption failed chat_id=%d", chat_id)
+            logger.warning("E2E decryption failed key=%s", key.storage_key)
             await channel.send(
                 {
                     "type": "error",
@@ -512,14 +522,14 @@ class ApiServer:
                 return
             # Intercept /stop since the orchestrator doesn't handle it
             if text.lower() == "/stop":
-                await self._dispatch_abort(channel, chat_id)
+                await self._dispatch_abort(channel, key.chat_id)
                 return
             async with lock:
-                set_log_context(operation="api", chat_id=chat_id)
-                await self._dispatch_message(channel, chat_id, text)
+                set_log_context(operation="api", chat_id=key.chat_id)
+                await self._dispatch_message(channel, key, text)
 
         elif msg_type == "abort":
-            await self._dispatch_abort(channel, chat_id)
+            await self._dispatch_abort(channel, key.chat_id)
 
         else:
             await channel.send(
@@ -535,7 +545,7 @@ class ApiServer:
     async def _dispatch_message(
         self,
         channel: _SecureChannel,
-        chat_id: int,
+        key: SessionKey,
         text: str,
     ) -> None:
         """Route a message through the orchestrator with encrypted streaming callbacks."""
@@ -550,17 +560,17 @@ class ApiServer:
             return
 
         callbacks = _StreamCallbacks(channel)
-        result = await self._execute_streaming(chat_id, text, callbacks)
+        result = await self._execute_streaming(key, text, callbacks)
         if result is None:
             return
 
         if callbacks.disconnected:
             logger.info(
-                "API client disconnected mid-stream, aborting chat_id=%d",
-                chat_id,
+                "API client disconnected mid-stream, aborting key=%s",
+                key.storage_key,
             )
             if self._handle_abort:
-                await self._handle_abort(chat_id)
+                await self._handle_abort(key.chat_id)
             return
 
         # Parse file references from the response for the app
@@ -577,7 +587,7 @@ class ApiServer:
 
     async def _execute_streaming(
         self,
-        chat_id: int,
+        key: SessionKey,
         text: str,
         callbacks: _StreamCallbacks,
     ) -> Any:
@@ -585,7 +595,7 @@ class ApiServer:
         assert self._handle_message is not None
         try:
             return await self._handle_message(
-                chat_id,
+                key,
                 text,
                 on_text_delta=callbacks.on_text,
                 on_tool_activity=callbacks.on_tool,
@@ -594,7 +604,7 @@ class ApiServer:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("API dispatch error chat_id=%d", chat_id)
+            logger.exception("API dispatch error key=%s", key.storage_key)
             await callbacks.channel.send(
                 {
                     "type": "error",
