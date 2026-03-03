@@ -60,6 +60,7 @@ async def run_startup(bot: TelegramBot) -> None:
     bot._orchestrator.set_webhook_result_handler(bot._on_webhook_result)
     bot._orchestrator.set_webhook_wake_handler(bot._handle_webhook_wake)
     bot._orchestrator.set_session_result_handler(bot._on_session_result)
+    bot._orchestrator.set_config_hot_reload_handler(bot._on_auth_hot_reload)
     bot._bus.set_injector(bot._orch)
 
     # Check for post-upgrade notification

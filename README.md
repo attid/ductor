@@ -206,7 +206,7 @@ ductor uses a dual-allowlist model. Every message must pass both checks before i
 | **Group / Supergroup** | `group_id ∈ allowed_group_ids` AND `user_id ∈ allowed_user_ids` |
 
 - **`allowed_user_ids`** — Telegram user IDs that may talk to the bot (private and group chats). At least one ID is required.
-- **`allowed_group_ids`** — Telegram group IDs where the bot is allowed to operate. Default `[]` means no groups (fail-closed). The bot silently ignores messages from unlisted groups.
+- **`allowed_group_ids`** — Telegram group IDs where the bot is allowed to operate. Default `[]` means no groups (fail-closed).
 - **`group_mention_only`** — When `true`, the bot only responds in groups when @mentioned or replied to. This is a content filter, not an auth bypass — the user and group must still be allowlisted.
 
 ```json
@@ -217,7 +217,22 @@ ductor uses a dual-allowlist model. Every message must pass both checks before i
 }
 ```
 
+Both `allowed_user_ids` and `allowed_group_ids` are **hot-reloadable** — edit `config.json` and changes take effect within seconds, no restart needed.
+
 Sub-agents each have their own `allowed_user_ids` and `allowed_group_ids` in `agents.json` — they do not inherit from the main agent.
+
+### Group management
+
+When the bot is added to a group that is **not** in `allowed_group_ids`, it sends a warning and auto-leaves. All group activity (joins, leaves, rejections) is tracked.
+
+**Getting a group ID:** Add the bot to the group — it will auto-leave but record the ID. Then use `/where` from any private chat to see it.
+
+| Command | Description |
+|---|---|
+| `/where` | Show all tracked chats: active, rejected, and left groups |
+| `/leave <group_id>` | Manually leave a group |
+
+These commands are not listed in the Telegram command popup — they work from any authorized chat.
 
 ## How it works
 

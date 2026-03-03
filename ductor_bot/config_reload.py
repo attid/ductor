@@ -52,6 +52,8 @@ _HOT_RELOADABLE: frozenset[str] = frozenset(
         "heartbeat",
         "cleanup",
         "cli_parameters",
+        "allowed_user_ids",
+        "allowed_group_ids",
     }
 )
 
@@ -59,8 +61,6 @@ _HOT_RELOADABLE: frozenset[str] = frozenset(
 _RESTART_REQUIRED: frozenset[str] = frozenset(
     {
         "telegram_token",
-        "allowed_user_ids",
-        "allowed_group_ids",
         "docker",
         "api",
         "webhooks",

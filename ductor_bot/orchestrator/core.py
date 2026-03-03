@@ -857,6 +857,13 @@ class Orchestrator:
 
         self._api_stop = server.stop
 
+    def set_config_hot_reload_handler(
+        self,
+        handler: Callable[[AgentConfig, dict[str, object]], None],
+    ) -> None:
+        """Register an external hot-reload callback (e.g. TelegramBot auth update)."""
+        self._config_hot_reload_handler = handler
+
     def _on_config_hot_reload(self, config: AgentConfig, hot: dict[str, object]) -> None:
         """Apply hot-reloaded config fields to dependent services."""
         if any(
@@ -890,6 +897,10 @@ class Orchestrator:
 
         if "model" in hot:
             self._refresh_known_model_ids()
+
+        handler = getattr(self, "_config_hot_reload_handler", None)
+        if handler is not None:
+            handler(config, hot)
 
         logger.info("Hot-reload applied to orchestrator services")
 

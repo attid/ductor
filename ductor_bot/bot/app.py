@@ -22,7 +22,7 @@ from ductor_bot.bot.callbacks import (
     mark_button_choice,
     parse_ns_callback,
 )
-from ductor_bot.bot.chat_tracker import ChatTracker
+from ductor_bot.bot.chat_tracker import ChatRecord, ChatTracker
 from ductor_bot.bot.file_browser import (
     file_browser_start,
     handle_file_browser_callback,
@@ -149,6 +149,7 @@ class TelegramBot:
 
         allowed = set(config.allowed_user_ids)
         allowed_groups = set(config.allowed_group_ids)
+        self._allowed_users = allowed
         self._allowed_groups = allowed_groups
         self._chat_tracker: ChatTracker | None = None  # set in _on_startup
         self._lock_pool = LockPool()
@@ -273,6 +274,17 @@ class TelegramBot:
             ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER),
         )
 
+    def _on_auth_hot_reload(self, config: AgentConfig, hot: dict[str, object]) -> None:
+        """Update auth sets in-place when config is hot-reloaded."""
+        if "allowed_user_ids" in hot:
+            self._allowed_users.clear()
+            self._allowed_users.update(config.allowed_user_ids)
+            logger.info("Auth hot-reloaded: allowed_user_ids (%d)", len(self._allowed_users))
+        if "allowed_group_ids" in hot:
+            self._allowed_groups.clear()
+            self._allowed_groups.update(config.allowed_group_ids)
+            logger.info("Auth hot-reloaded: allowed_group_ids (%d)", len(self._allowed_groups))
+
     # -- Chat tracker (my_chat_member + /where + /leave) ------------------------
 
     def _on_group_rejected(self, chat_id: int, chat_type: str, title: str) -> None:
@@ -311,6 +323,12 @@ class TelegramBot:
             self._chat_tracker.record_leave(chat.id, status)
         logger.info("Bot removed from group chat_id=%d status=%s", chat.id, status)
 
+    @staticmethod
+    def _where_line(r: ChatRecord) -> str:
+        """Format a single chat record for /where output."""
+        title = r.title or "untitled"
+        return f"`{r.chat_id}` — {title} ({r.chat_type})"
+
     def _format_where(self) -> str:
         """Build the /where response text."""
         if not self._chat_tracker:
@@ -325,23 +343,16 @@ class TelegramBot:
         left = [r for r in records if r.status in ("left", "kicked", "auto_left")]
 
         if active:
-            lines = []
-            for r in active:
-                label = r.title or str(r.chat_id)
-                lines.append(f"  {r.chat_type} | <code>{r.chat_id}</code> | {label}")
+            lines = [self._where_line(r) for r in active]
             sections.append("**Active**\n" + "\n".join(lines))
         if rejected:
             lines = []
             for r in rejected:
-                label = r.title or str(r.chat_id)
-                extra = f" ({r.rejected_count}x)" if r.rejected_count else ""
-                lines.append(f"  {r.chat_type} | <code>{r.chat_id}</code> | {label}{extra}")
+                extra = f" — {r.rejected_count}x rejected" if r.rejected_count else ""
+                lines.append(f"{self._where_line(r)}{extra}")
             sections.append("**Rejected**\n" + "\n".join(lines))
         if left:
-            lines = []
-            for r in left:
-                label = r.title or str(r.chat_id)
-                lines.append(f"  {r.status} | <code>{r.chat_id}</code> | {label}")
+            lines = [f"{self._where_line(r)} [{r.status}]" for r in left]
             sections.append("**Left**\n" + "\n".join(lines))
 
         return fmt("**Where**", SEP, *sections)
