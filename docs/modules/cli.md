@@ -173,6 +173,7 @@ Windows uses process-tree termination (`taskkill /F /T`) to avoid orphaned child
 - container mode:
   - wraps command as `docker exec ... <container> ...`,
   - injects `DUCTOR_CHAT_ID`, optional `DUCTOR_TOPIC_ID`, `DUCTOR_AGENT_NAME`, `DUCTOR_INTERAGENT_PORT`, `DUCTOR_HOME`, `DUCTOR_SHARED_MEMORY_PATH`, and `DUCTOR_INTERAGENT_HOST`,
-  - forwards optional env vars via `-e` flags (`extra_env`),
+  - merges user secrets from `~/.ductor/.env` (never overrides existing vars),
+  - forwards optional env vars via `-e` flags (`extra_env`, overrides `.env`),
   - uses `-i` when `interactive=True` (required for stdin-fed providers like Gemini),
   - returns `cwd=None` (execution happens inside container context).

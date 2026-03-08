@@ -5,6 +5,7 @@ Runtime infrastructure: process lifecycle, restart/update flow, Docker sandbox, 
 ## Files
 
 - process/runtime: `pidlock.py`, `restart.py`, `inflight.py`, `recovery.py`, `startup_state.py`, `boot_id.py`
+- secrets: `env_secrets.py`
 - Docker: `docker.py`
 - service: `service.py`, `service_base.py`, `service_logs.py`, `service_linux.py`, `service_macos.py`, `service_windows.py`
 - update/version: `install.py`, `version.py`, `updater.py`
@@ -84,6 +85,20 @@ Platform dispatch via `infra/service.py`:
 - `json_store.py`: `atomic_json_save`, `load_json`
 
 These are used across session/task/cron/webhook/config persistence paths.
+
+## Environment secrets (`env_secrets.py`)
+
+Centralised loading of user-defined API secrets from `~/.ductor/.env`.
+
+- standard dotenv syntax (comments, `export` prefix, single/double quotes)
+- loaded once per process and cached
+- injected at three points:
+  - `_build_subprocess_env()` in `executor.py` (host CLI execution)
+  - `docker_wrap()` in `base.py` (`docker exec -e` flags)
+  - `_start_container()` in `docker.py` (`docker run -e` flags)
+- existing environment variables are never overridden
+- provider-specific `extra_env` (e.g. `GEMINI_API_KEY` from config) takes precedence
+- mtime-based cache invalidation: edits take effect on the next CLI invocation without restart
 
 ## Shared task observer helpers
 

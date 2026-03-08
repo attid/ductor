@@ -33,6 +33,33 @@ API config persistence note:
 - `load_config()` intentionally does not auto-add the `api` block during default deep-merge (beta gating).
 - `ductor api enable` writes the `api` block (including generated token) into `config.json`.
 
+## External API Secrets (`~/.ductor/.env`)
+
+User-defined environment secrets for external APIs (e.g. `PPLX_API_KEY`, `DEEPSEEK_API_KEY`).
+
+Standard dotenv syntax:
+
+```env
+PPLX_API_KEY=sk-xxx
+DEEPSEEK_API_KEY=sk-yyy
+export MY_VAR="quoted value"
+```
+
+Propagation:
+
+- host CLI execution: merged into subprocess env via `_build_subprocess_env()`
+- Docker exec: injected as `-e` flags via `docker_wrap()`
+- Docker container creation: injected as `-e` flags via `_start_container()`
+- sub-agents and background tasks: inherited through the same execution paths
+
+Priority (highest to lowest):
+
+1. existing host environment variables (never overridden)
+2. provider-specific config (e.g. `gemini_api_key` in `config.json`)
+3. `.env` values (fill gaps only)
+
+Changes take effect on the next CLI invocation (mtime-based cache invalidation, no restart needed).
+
 ## `AgentConfig` (`ductor_bot/config.py`)
 
 | Field | Type | Default | Notes |

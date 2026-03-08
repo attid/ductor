@@ -84,7 +84,7 @@ def test_empty_file_returns_empty(tmp_path: Path) -> None:
     assert result == {}
 
 
-def test_caching(tmp_path: Path) -> None:
+def test_caching_same_mtime(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("A=1\n")
 
@@ -92,15 +92,43 @@ def test_caching(tmp_path: Path) -> None:
     first = load_env_secrets(env_file)
     assert first == {"A": "1"}
 
-    # Modify file — cached result should persist.
-    env_file.write_text("A=2\nB=3\n")
+    # Same mtime → cached object returned.
     second = load_env_secrets(env_file)
-    assert second is first  # Same object (cached).
+    assert second is first
 
-    # After clearing cache, new values are read.
+
+def test_auto_reload_on_mtime_change(tmp_path: Path) -> None:
+    import os
+    import time
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("A=1\n")
+
     clear_cache()
-    third = load_env_secrets(env_file)
-    assert third == {"A": "2", "B": "3"}
+    first = load_env_secrets(env_file)
+    assert first == {"A": "1"}
+
+    # Change file content AND bump mtime to ensure cache invalidation.
+    env_file.write_text("A=2\nB=3\n")
+    # Force a different mtime (filesystem granularity can be 1s).
+    new_mtime = time.time() + 2
+    os.utime(env_file, (new_mtime, new_mtime))
+
+    second = load_env_secrets(env_file)
+    assert second == {"A": "2", "B": "3"}
+
+
+def test_clear_cache_forces_reload(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("X=old\n")
+
+    clear_cache()
+    load_env_secrets(env_file)
+
+    env_file.write_text("X=new\n")
+    clear_cache()
+    result = load_env_secrets(env_file)
+    assert result == {"X": "new"}
 
 
 def test_line_without_equals_skipped(tmp_path: Path) -> None:

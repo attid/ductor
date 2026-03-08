@@ -20,6 +20,7 @@ Important runtime paths:
 - `config_path`: `~/.ductor/config/config.json`
 - `sessions_path`: `~/.ductor/sessions.json`
 - `named_sessions_path`: `~/.ductor/named_sessions.json`
+- `env_file`: `~/.ductor/.env`
 - `tasks_registry_path`: `~/.ductor/tasks.json`
 - `chat_activity_path`: `~/.ductor/chat_activity.json`
 - `startup_state_path`: `~/.ductor/startup_state.json`

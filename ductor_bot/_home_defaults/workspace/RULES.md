@@ -82,7 +82,7 @@ DEEPSEEK_API_KEY=sk-yyy
 
 These secrets are automatically available in all CLI executions (host and Docker).
 Existing environment variables are never overridden.
-After editing `.env`, restart the bot for changes to take effect.
+Changes take effect on the next CLI invocation (no restart needed).
 
 ## Bot Restart
 
