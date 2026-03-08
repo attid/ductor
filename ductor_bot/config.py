@@ -263,6 +263,7 @@ class AgentConfig(BaseModel):
     user_timezone: str = ""
     update_check: bool = True
     group_mention_only: bool = False
+    interagent_port: int = 8799
     transport: str = "telegram"  # "telegram" | "matrix"
     telegram_token: str = ""
     allowed_user_ids: list[int] = Field(default_factory=list)

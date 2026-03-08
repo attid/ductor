@@ -103,7 +103,9 @@ class AgentSupervisor:
 
         self._bus = InterAgentBus()
         self._internal_api = InternalAgentAPI(
-            self._bus, docker_mode=self._main_config.docker.enabled
+            self._bus,
+            port=self._main_config.interagent_port,
+            docker_mode=self._main_config.docker.enabled,
         )
         self._internal_api.set_health_ref(self._health)
         started = await self._internal_api.start()
