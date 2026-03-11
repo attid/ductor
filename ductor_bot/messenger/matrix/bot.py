@@ -20,10 +20,12 @@ from ductor_bot.commands import BOT_COMMANDS, MULTIAGENT_SUB_COMMANDS
 from ductor_bot.config import AgentConfig
 from ductor_bot.files.allowed_roots import resolve_allowed_roots
 from ductor_bot.infra.version import get_current_version
+from ductor_bot.messenger.commands import classify_command
 from ductor_bot.messenger.matrix.buttons import ButtonTracker
 from ductor_bot.messenger.matrix.credentials import login_or_restore
 from ductor_bot.messenger.matrix.id_map import MatrixIdMap
 from ductor_bot.messenger.matrix.sender import send_rich as matrix_send_rich
+from ductor_bot.messenger.matrix.streaming import MatrixStreamEditor
 from ductor_bot.messenger.matrix.typing import MatrixTypingContext
 from ductor_bot.messenger.notifications import NotificationService
 from ductor_bot.session.key import SessionKey
@@ -242,7 +244,7 @@ class MatrixBot:
                 await self._restart_watcher
 
         if self._update_observer:
-            self._update_observer.stop()
+            await self._update_observer.stop()
 
         self._save_sync_token()
         await self._client.close()
@@ -274,10 +276,11 @@ class MatrixBot:
         """Handle incoming room messages."""
         from nio import MatrixRoom, RoomMessageText
 
-        if not self._ready:
-            return
-
-        if not isinstance(room, MatrixRoom) or not isinstance(event, RoomMessageText):
+        if (
+            not self._ready
+            or not isinstance(room, MatrixRoom)
+            or not isinstance(event, RoomMessageText)
+        ):
             return
 
         if not self._should_process_event(room, event, event.sender):
@@ -310,7 +313,7 @@ class MatrixBot:
             await self._handle_command(text, room_id, chat_id, event)
             return
 
-        key = SessionKey(transport="mx", chat_id=chat_id, topic_id=None)
+        key = SessionKey.matrix(chat_id)
         await self._dispatch_message(key, text, room_id, event)
 
     async def _on_media(self, room: MatrixRoom | object, event: RoomMessageMedia | object) -> None:
@@ -358,26 +361,8 @@ class MatrixBot:
         if not text:
             return
 
-        key = SessionKey(transport="mx", chat_id=chat_id, topic_id=None)
+        key = SessionKey.matrix(chat_id)
         await self._dispatch_message(key, text, room_id, event)
-
-    # Commands routed to the orchestrator's CommandRegistry
-    _ORCHESTRATOR_COMMANDS = frozenset(
-        {
-            "status",
-            "model",
-            "memory",
-            "cron",
-            "diagnose",
-            "upgrade",
-            "sessions",
-            "tasks",
-            "agents",
-            "agent_start",
-            "agent_stop",
-            "agent_restart",
-        }
-    )
 
     async def _handle_command(self, text: str, room_id: str, chat_id: int, event: object) -> None:
         """Handle commands in Matrix. Supports both !cmd and /cmd prefixes."""
@@ -386,12 +371,12 @@ class MatrixBot:
         # Ensure text has / prefix for orchestrator compatibility
         if text.startswith("!"):
             text = "/" + text[1:]
-        key = SessionKey(transport="mx", chat_id=chat_id, topic_id=None)
+        key = SessionKey.matrix(chat_id)
 
         handler = self._COMMAND_DISPATCH.get(cmd)
         if handler is not None:
             await handler(self, text=text, room_id=room_id, key=key, event=event)
-        elif cmd in self._ORCHESTRATOR_COMMANDS:
+        elif classify_command(cmd) in ("orchestrator", "multiagent"):
             await self._cmd_orchestrator(text=text, room_id=room_id, key=key, event=event)
         else:
             # Unknown command → treat as regular message
@@ -490,11 +475,18 @@ class MatrixBot:
     async def _cmd_showfiles(
         self, *, text: str, room_id: str, key: SessionKey, event: object
     ) -> None:
-        """Show file browser (not yet supported on Matrix)."""
-        await self._send_rich(
-            room_id,
-            "File browser is not yet supported in Matrix. Use `!status` to see workspace info.",
-        )
+        """Show workspace file listing."""
+        orch = self._orchestrator
+        if not orch:
+            return
+
+        from ductor_bot.messenger.matrix.file_browser import format_file_listing
+
+        parts = text.split(None, 1)
+        subdir = parts[1].strip() if len(parts) > 1 else ""
+
+        listing = await asyncio.to_thread(format_file_listing, orch.paths, subdir)
+        await self._send_rich(room_id, listing)
 
     async def _cmd_session(
         self, *, text: str, room_id: str, key: SessionKey, event: object
@@ -583,74 +575,21 @@ class MatrixBot:
         if orch is None:
             return
 
-        buffer = [""]
-        segment_count = [0]
-
-        async def _on_delta(delta: str) -> None:
-            buffer[0] += delta
-
-        async def _flush_and_tag(_tag: str) -> None:
-            """Flush buffer and re-set typing indicator.
-
-            The *tag* (tool/system marker) is intentionally not sent to
-            keep the Matrix chat clean — only reasoning text and the
-            final summary are visible to the user.
-            """
-            seg_text = buffer[0].strip()
-            if seg_text:
-                await self._send_rich(room_id, buffer[0])
-            buffer[0] = ""
-            # Re-set typing indicator (sending messages clears it in Matrix)
-            with contextlib.suppress(Exception):
-                await self._client.room_typing(room_id, typing_state=True, timeout=30000)
-
-        async def _on_tool(tool_name: str) -> None:
-            segment_count[0] += 1
-            logger.info(
-                "Matrix streaming: tool=%s segment=%d buf_len=%d",
-                tool_name,
-                segment_count[0],
-                len(buffer[0].strip()),
-            )
-            await _flush_and_tag(f"**[TOOL: {tool_name}]**")
-
-        async def _on_system(status: str | None) -> None:
-            system_map: dict[str, str] = {
-                "thinking": "THINKING",
-                "compacting": "COMPACTING",
-                "recovering": "Please wait, recovering...",
-                "timeout_warning": "TIMEOUT APPROACHING",
-                "timeout_extended": "TIMEOUT EXTENDED",
-            }
-            label = system_map.get(status or "")
-            if label is None:
-                return
-            await _flush_and_tag(f"*[{label}]*")
-
+        editor = MatrixStreamEditor(
+            self._client,
+            room_id,
+            send_fn=self._send_rich,
+            button_tracker=self._button_tracker,
+        )
         async with MatrixTypingContext(self._client, room_id):
             result = await orch.handle_message_streaming(
                 key,
                 text,
-                on_text_delta=_on_delta,
-                on_tool_activity=_on_tool,
-                on_system_status=_on_system,
+                on_text_delta=editor.on_delta,
+                on_tool_activity=editor.on_tool,
+                on_system_status=editor.on_system,
             )
-
-        # Send the final segment (with button extraction).
-        final_text = buffer[0].strip()
-        logger.info(
-            "Matrix streaming done: segments=%d final_buf_len=%d result_len=%d",
-            segment_count[0],
-            len(final_text),
-            len(result.text) if result.text else 0,
-        )
-        if final_text:
-            formatted = self._button_tracker.extract_and_format(room_id, final_text)
-            await self._send_rich(room_id, formatted)
-        elif result.text:
-            # Fallback: no deltas received but orchestrator returned text.
-            formatted = self._button_tracker.extract_and_format(room_id, result.text)
-            await self._send_rich(room_id, formatted)
+        await editor.finalize(result.text)
 
     async def _run_non_streaming(
         self, key: SessionKey, text: str, room_id: str, event: object
@@ -701,7 +640,7 @@ class MatrixBot:
         # Named rooms are never DMs
         if room.name or room.canonical_alias:
             return False
-        return room.member_count <= 2
+        return bool(room.member_count <= 2)
 
     def _is_message_addressed(
         self,
@@ -839,54 +778,31 @@ class MatrixBot:
         self, room_id: str, message_event_id: str, callback_data: str
     ) -> None:
         """Route a button callback_data through the selector handlers."""
-        from ductor_bot.orchestrator.selectors.cron_selector import (
-            handle_cron_callback,
-            is_cron_selector_callback,
-        )
-        from ductor_bot.orchestrator.selectors.model_selector import (
-            handle_model_callback,
-            is_model_selector_callback,
-        )
-        from ductor_bot.orchestrator.selectors.session_selector import (
-            handle_session_callback,
-            is_session_selector_callback,
-        )
-        from ductor_bot.orchestrator.selectors.task_selector import (
-            handle_task_callback,
-            is_task_selector_callback,
-        )
+        from ductor_bot.messenger.callback_router import route_callback
 
         orch = self._orchestrator
         if not orch:
             return
 
         chat_id = self._id_map.room_to_int(room_id)
-        key = SessionKey(transport="mx", chat_id=chat_id, topic_id=None)
-        resp = None
+        key = SessionKey.matrix(chat_id)
 
-        if is_model_selector_callback(callback_data):
-            resp = await handle_model_callback(orch, key, callback_data)
-        elif is_cron_selector_callback(callback_data):
-            resp = await handle_cron_callback(orch, callback_data)
-        elif is_session_selector_callback(callback_data):
-            resp = await handle_session_callback(orch, chat_id, callback_data)
-        elif is_task_selector_callback(callback_data):
-            resp = await handle_task_callback(orch, callback_data)
-        elif callback_data.startswith("upg:"):
-            await self._handle_upgrade_callback(room_id, callback_data)
+        result = await route_callback(orch, key, callback_data)
+        if result.handled:
+            if result.text:
+                await self._send_selector_response(room_id, result.text, result.buttons)
             return
+
+        # Transport-specific callbacks handled locally.
+        if callback_data.startswith("upg:"):
+            await self._handle_upgrade_callback(room_id, callback_data)
         elif callback_data.startswith("ns:"):
             await self._handle_ns_callback(room_id, key, callback_data)
-            return
         else:
             # Unknown callback — treat as text input to the orchestrator
-            result = await orch.handle_message(key, callback_data)
-            if result and result.text:
-                await self._send_rich(room_id, result.text)
-            return
-
-        if resp:
-            await self._send_selector_response(room_id, resp.text, resp.buttons)
+            resp = await orch.handle_message(key, callback_data)
+            if resp and resp.text:
+                await self._send_rich(room_id, resp.text)
 
     # --- Upgrade callback ---
 
@@ -922,9 +838,7 @@ class MatrixBot:
             if changed:
                 marker = _expand_marker(self._config.ductor_home)
                 write_restart_marker(marker_path=marker)
-                await self._send_rich(
-                    room_id, f"Upgraded {current} → {installed}. Restarting..."
-                )
+                await self._send_rich(room_id, f"Upgraded {current} → {installed}. Restarting...")
                 self._exit_code = EXIT_RESTART
                 if self._sync_task and not self._sync_task.done():
                     self._sync_task.cancel()
@@ -935,9 +849,7 @@ class MatrixBot:
 
     # --- Named session callback ---
 
-    async def _handle_ns_callback(
-        self, room_id: str, key: SessionKey, data: str
-    ) -> None:
+    async def _handle_ns_callback(self, room_id: str, key: SessionKey, data: str) -> None:
         """Handle ``ns:<session_name>:<label>`` button callbacks."""
         from ductor_bot.messenger.telegram.callbacks import parse_ns_callback
 

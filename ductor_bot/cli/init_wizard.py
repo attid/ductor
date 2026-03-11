@@ -599,12 +599,15 @@ def _load_existing_config(config_path: Path) -> dict[str, object]:
     """Load existing config or return empty dict."""
     if config_path.exists():
         try:
-            return json.loads(config_path.read_text(encoding="utf-8"))
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             logger.warning(
                 "Ignoring invalid config file during onboarding: %s",
                 config_path,
             )
+        else:
+            result: dict[str, object] = raw
+            return result
     return {}
 
 

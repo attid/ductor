@@ -44,7 +44,7 @@ def get_session_key(message: Message) -> SessionKey:
             message.message_thread_id,
             topic_id,
         )
-    return SessionKey(transport="tg", chat_id=message.chat.id, topic_id=topic_id)
+    return SessionKey.telegram(chat_id=message.chat.id, topic_id=topic_id)
 
 
 def get_topic_name_from_message(message: Message) -> str | None:

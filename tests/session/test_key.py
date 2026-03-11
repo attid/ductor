@@ -112,6 +112,64 @@ class TestLockKey:
         assert a.lock_key != b.lock_key
 
 
+class TestFactoryMethods:
+    """Tests for SessionKey factory classmethods."""
+
+    def test_telegram_flat(self) -> None:
+        key = SessionKey.telegram(chat_id=123)
+        assert key == SessionKey(transport="tg", chat_id=123)
+
+    def test_telegram_with_topic(self) -> None:
+        key = SessionKey.telegram(chat_id=123, topic_id=45)
+        assert key == SessionKey(transport="tg", chat_id=123, topic_id=45)
+
+    def test_telegram_negative_chat_id(self) -> None:
+        key = SessionKey.telegram(chat_id=-100123, topic_id=7)
+        assert key.transport == "tg"
+        assert key.chat_id == -100123
+        assert key.topic_id == 7
+
+    def test_matrix_flat(self) -> None:
+        key = SessionKey.matrix(chat_id=999)
+        assert key == SessionKey(transport="mx", chat_id=999)
+
+    def test_matrix_no_topic(self) -> None:
+        key = SessionKey.matrix(chat_id=42)
+        assert key.topic_id is None
+
+    def test_for_transport_generic(self) -> None:
+        key = SessionKey.for_transport("api", chat_id=1, topic_id=5)
+        assert key == SessionKey(transport="api", chat_id=1, topic_id=5)
+
+    def test_for_transport_default_topic(self) -> None:
+        key = SessionKey.for_transport("custom", chat_id=10)
+        assert key.topic_id is None
+
+    def test_factory_roundtrip(self) -> None:
+        """Factory-created keys round-trip through storage_key/parse."""
+        cases = [
+            SessionKey.telegram(chat_id=123),
+            SessionKey.telegram(chat_id=123, topic_id=45),
+            SessionKey.matrix(chat_id=999),
+            SessionKey.for_transport("api", chat_id=1, topic_id=5),
+        ]
+        for key in cases:
+            assert SessionKey.parse(key.storage_key) == key
+
+    def test_factory_keys_are_frozen(self) -> None:
+        key = SessionKey.telegram(chat_id=1)
+        with pytest.raises(AttributeError):
+            key.chat_id = 2  # type: ignore[misc]
+
+    def test_factory_keys_are_hashable(self) -> None:
+        keys = {
+            SessionKey.telegram(chat_id=1),
+            SessionKey.telegram(chat_id=1),
+            SessionKey.matrix(chat_id=1),
+        }
+        assert len(keys) == 2
+
+
 class TestFrozenAndEquality:
     def test_frozen(self) -> None:
         key = SessionKey(chat_id=1)

@@ -42,13 +42,15 @@ async def run_matrix_startup(bot: MatrixBot) -> None:
 
         # Update checker
         try:
-            from ductor_bot.infra.updater import UpdateObserver, is_upgradeable
+            from ductor_bot.infra.install import is_upgradeable
+            from ductor_bot.infra.updater import UpdateObserver
+            from ductor_bot.infra.version import VersionInfo
 
             if is_upgradeable() and bot._config.update_check:
 
-                async def _on_update(version: str) -> None:
+                async def _on_update(info: VersionInfo) -> None:
                     await bot.notification_service.notify_all(
-                        f"**Update available:** `{version}`\nUse `/upgrade` to update."
+                        f"**Update available:** `{info.latest}`\nUse `/upgrade` to update."
                     )
 
                 bot._update_observer = UpdateObserver(notify=_on_update)

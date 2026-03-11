@@ -110,9 +110,9 @@ class CleanupConfig(BaseModel):
     def __init__(self, **data: object) -> None:
         # Backwards compat: accept old name ``telegram_files_days``.
         if "telegram_files_days" in data and "media_files_days" not in data:
-            data["media_files_days"] = data.pop("telegram_files_days")  # type: ignore[union-attr]
+            data["media_files_days"] = data.pop("telegram_files_days")
         elif "telegram_files_days" in data:
-            data.pop("telegram_files_days")  # type: ignore[union-attr]
+            data.pop("telegram_files_days")
         super().__init__(**data)
 
 

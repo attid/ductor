@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -65,19 +64,3 @@ def _no_real_service_management() -> object:
         "ductor_bot.cli_commands.lifecycle._stop_service_if_running",
     ):
         yield
-
-
-@pytest.fixture
-def tmp_ductor_home(tmp_path: Path) -> Path:
-    """Temporary ~/.ductor equivalent."""
-    home = tmp_path / ".ductor"
-    home.mkdir()
-    return home
-
-
-@pytest.fixture
-def tmp_workspace(tmp_ductor_home: Path) -> Path:
-    """Temporary workspace directory."""
-    ws = tmp_ductor_home / "workspace"
-    ws.mkdir()
-    return ws

@@ -210,11 +210,6 @@ class NamedSessionRegistry:
         entries = [asdict(ns) for ns in self._sessions.values() if ns.status != "ended"]
         atomic_json_save(self._path, {"sessions": entries})
 
-    async def _persist_async(self) -> None:
-        """Persist under lock."""
-        async with self._lock:
-            self._persist()
-
     def create(
         self,
         chat_id: int,

@@ -111,10 +111,6 @@ class ProcessRegistry:
             self._processes.pop(chat_id, None)
         return await _kill_processes(to_kill)
 
-    def was_label_aborted(self, chat_id: int, label: str) -> bool:
-        """Check whether a specific label was aborted."""
-        return (chat_id, label) in self._aborted_labels
-
     def clear_label_abort(self, chat_id: int, label: str) -> None:
         """Clear the abort flag for a specific label."""
         self._aborted_labels.discard((chat_id, label))

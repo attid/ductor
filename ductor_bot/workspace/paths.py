@@ -76,10 +76,6 @@ class DuctorPaths:
         return self.workspace / "tools"
 
     @property
-    def user_tools_dir(self) -> Path:
-        return self.workspace / "tools" / "user_tools"
-
-    @property
     def output_to_user_dir(self) -> Path:
         return self.workspace / "output_to_user"
 
@@ -94,12 +90,6 @@ class DuctorPaths:
     @property
     def api_files_dir(self) -> Path:
         return self.workspace / "api_files"
-
-    def media_files_dir(self, transport: str) -> Path:
-        """Return the media files directory for the given transport."""
-        if transport == "matrix":
-            return self.matrix_files_dir
-        return self.telegram_files_dir
 
     @property
     def memory_system_dir(self) -> Path:

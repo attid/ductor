@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from ductor_bot.files.browser import list_directory
 from ductor_bot.security.paths import is_path_safe
 from ductor_bot.text.response_format import SEP, fmt
 
@@ -26,7 +27,6 @@ if TYPE_CHECKING:
 SF_PREFIX = "sf:"
 SF_FILE_PREFIX = "sf!"
 
-_EXCLUDED_NAMES = frozenset({"__pycache__", ".git"})
 _MAX_BUTTONS_PER_ROW = 3
 
 
@@ -79,7 +79,7 @@ def _build_view(paths: DuctorPaths, rel: str) -> tuple[str, InlineKeyboardMarkup
             inline_keyboard=[[InlineKeyboardButton(text="<< Back", callback_data="sf:")]]
         )
 
-    dirs, files = _list_directory(target)
+    dirs, files = list_directory(target)
 
     display_path = f"~/.ductor/{rel}" if rel else "~/.ductor/"
     if not display_path.endswith("/"):
@@ -117,24 +117,3 @@ def _build_view(paths: DuctorPaths, rel: str) -> tuple[str, InlineKeyboardMarkup
     )
 
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def _list_directory(target: Path) -> tuple[list[str], list[str]]:
-    """List directory contents, returning ``(dirs, files)`` sorted alphabetically.
-
-    Hidden files and excluded directories are filtered out.
-    """
-    dirs: list[str] = []
-    files: list[str] = []
-    try:
-        for entry in sorted(target.iterdir(), key=lambda p: p.name.lower()):
-            name = entry.name
-            if name.startswith(".") or name in _EXCLUDED_NAMES:
-                continue
-            if entry.is_dir():
-                dirs.append(name)
-            else:
-                files.append(name)
-    except PermissionError:
-        pass
-    return dirs, files

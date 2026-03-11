@@ -18,9 +18,6 @@ from ductor_bot.cli_commands.agents import cmd_agents as _cmd_agents
 from ductor_bot.cli_commands.api_cmd import cmd_api as _cmd_api
 from ductor_bot.cli_commands.docker import cmd_docker as _cmd_docker
 from ductor_bot.cli_commands.install import cmd_install as _cmd_install
-from ductor_bot.cli_commands.lifecycle import (  # noqa: F401
-    _re_exec_bot,
-)
 from ductor_bot.cli_commands.lifecycle import (
     cmd_restart as _cmd_restart,
 )

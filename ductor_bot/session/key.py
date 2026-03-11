@@ -34,6 +34,21 @@ class SessionKey:
         return (self.chat_id, self.topic_id)
 
     @classmethod
+    def for_transport(cls, transport: str, chat_id: int, topic_id: int | None = None) -> SessionKey:
+        """Create a session key for the given transport."""
+        return cls(transport=transport, chat_id=chat_id, topic_id=topic_id)
+
+    @classmethod
+    def telegram(cls, chat_id: int, topic_id: int | None = None) -> SessionKey:
+        """Create a Telegram session key."""
+        return cls(transport="tg", chat_id=chat_id, topic_id=topic_id)
+
+    @classmethod
+    def matrix(cls, chat_id: int) -> SessionKey:
+        """Create a Matrix session key."""
+        return cls(transport="mx", chat_id=chat_id)
+
+    @classmethod
     def parse(cls, raw: str) -> SessionKey:
         """Parse a storage key back to ``SessionKey``.
 

@@ -330,18 +330,6 @@ def docker_list_mounts() -> None:
     _console.print(table)
 
 
-def docker_container_name() -> str:
-    """Return the configured Docker container name or default."""
-    result = docker_read_config()
-    if result is None:
-        return "ductor-sandbox"
-    _, data = result
-    docker = data.get("docker", {})
-    if isinstance(docker, dict):
-        return str(docker.get("container_name", "ductor-sandbox"))
-    return "ductor-sandbox"
-
-
 # -- extras subcommands -----------------------------------------------------
 
 

@@ -7,7 +7,7 @@ import html as html_mod
 import logging
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +16,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, ReplyParameters
 
 from ductor_bot.files.tags import FILE_PATH_RE, extract_file_paths, guess_mime, path_from_file_tag
+from ductor_bot.messenger.send_opts import BaseSendOpts
 from ductor_bot.messenger.telegram.buttons import extract_buttons
 from ductor_bot.messenger.telegram.formatting import (
     markdown_to_telegram_html,
@@ -29,11 +30,10 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True)
-class SendRichOpts:
+class SendRichOpts(BaseSendOpts):
     """Optional parameters for :func:`send_rich`."""
 
     reply_to_message_id: int | None = None
-    allowed_roots: Sequence[Path] | None = field(default=None)
     reply_markup: InlineKeyboardMarkup | None = None
     thread_id: int | None = None
 

@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from ductor_bot.infra.restart import consume_restart_sentinel
 from ductor_bot.infra.updater import UpdateObserver, consume_upgrade_sentinel
 from ductor_bot.infra.version import get_current_version
-from ductor_bot.messenger.telegram.sender import SendRichOpts, send_rich
 
 if TYPE_CHECKING:
     from ductor_bot.messenger.telegram.app import TelegramBot
@@ -26,12 +25,7 @@ async def _handle_restart_sentinel(bot: TelegramBot) -> dict[str, object] | None
         chat_id = int(sentinel.get("chat_id", 0))
         msg = str(sentinel.get("message", "Restart completed."))
         if chat_id:
-            await send_rich(
-                bot.bot_instance,
-                chat_id,
-                msg,
-                SendRichOpts(allowed_roots=bot.file_roots(bot._orch.paths)),
-            )
+            await bot.notification_service.notify(chat_id, msg)
     return sentinel
 
 
@@ -70,13 +64,8 @@ async def _run_primary_startup(bot: TelegramBot) -> None:
         old_v = upgrade.get("old_version", "?")
         new_v = upgrade.get("new_version", get_current_version())
         if uid:
-            await send_rich(
-                bot.bot_instance,
-                uid,
-                f"**Upgrade complete** `{old_v}` -> `{new_v}`",
-                SendRichOpts(
-                    allowed_roots=bot.file_roots(bot._orch.paths),
-                ),
+            await bot.notification_service.notify(
+                uid, f"**Upgrade complete** `{old_v}` -> `{new_v}`"
             )
 
     # -- Startup lifecycle detection --
@@ -88,7 +77,7 @@ async def _run_primary_startup(bot: TelegramBot) -> None:
     if sentinel is None and startup_info.kind.value != "service_restart":
         note = startup_notification_text(startup_info.kind.value)
         if note:
-            await bot.broadcast(note, SendRichOpts(allowed_roots=bot.file_roots(bot._orch.paths)))
+            await bot.notification_service.notify_all(note)
 
     # -- Auto-recovery of interrupted work --
     from ductor_bot.infra.recovery import RecoveryPlanner
@@ -101,12 +90,7 @@ async def _run_primary_startup(bot: TelegramBot) -> None:
     )
     for action in planner.plan():
         note = recovery_notification_text(action.kind, action.prompt_preview, action.session_name)
-        await send_rich(
-            bot.bot_instance,
-            action.chat_id,
-            note,
-            SendRichOpts(allowed_roots=bot.file_roots(bot._orch.paths)),
-        )
+        await bot.notification_service.notify(action.chat_id, note)
         if action.kind == "named_session" and action.session_name:
             with contextlib.suppress(Exception):
                 bot._orch.submit_named_followup_bg(

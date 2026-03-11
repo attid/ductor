@@ -1361,14 +1361,6 @@ class TelegramBot:
 
         await handle_upgrade_callback(self, chat_id, message_id, data, thread_id=thread_id)
 
-    async def _handle_changelog_callback(
-        self, chat_id: int, message_id: int, data: str, *, thread_id: int | None = None
-    ) -> None:
-        """Fetch and display changelog for ``upg:cl:<version>``."""
-        from ductor_bot.messenger.telegram.upgrade_handler import handle_changelog_callback
-
-        await handle_changelog_callback(self, chat_id, message_id, data, thread_id=thread_id)
-
     async def _sync_commands(self) -> None:
         from aiogram.types import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 

@@ -379,8 +379,6 @@ class InterAgentBus:
                 return
 
             ns = target.bot.notification_service
-            if ns is None:
-                return
 
             # Use explicit summary if provided, otherwise truncate message
             if task.summary:

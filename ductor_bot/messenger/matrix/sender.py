@@ -9,12 +9,14 @@ import asyncio
 import io
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ductor_bot.files.tags import guess_mime, path_from_file_tag
 from ductor_bot.messenger.matrix.formatting import markdown_to_matrix_html
+from ductor_bot.messenger.send_opts import BaseSendOpts
 
 if TYPE_CHECKING:
     from nio import AsyncClient
@@ -29,12 +31,11 @@ _FILE_TAG_RE = re.compile(r"<file:(.*?)>")
 
 
 @dataclass
-class MatrixSendOpts:
+class MatrixSendOpts(BaseSendOpts):
     """Options for sending a Matrix message."""
 
     reply_to_event_id: str | None = None
     thread_event_id: str | None = None
-    allowed_roots: list[Path] | None = None
 
 
 async def send_rich(
@@ -104,7 +105,7 @@ async def send_rich(
 
 def _file_accessible(
     file_path: Path,
-    allowed_roots: list[Path] | None,
+    allowed_roots: Sequence[Path] | None,
 ) -> bool:
     """Check if *file_path* exists and is within *allowed_roots* (sync)."""
     if not file_path.exists():
@@ -168,7 +169,7 @@ async def _upload_and_send_file(
 
     send_resp = await client.room_send(room_id, "m.room.message", content)
     if hasattr(send_resp, "event_id"):
-        return send_resp.event_id
+        return str(send_resp.event_id)
     logger.warning("File send failed for %s in %s: %s", file_name, room_id, send_resp)
     return None
 
@@ -227,18 +228,3 @@ async def redact_message(
     except Exception:
         logger.debug("Redact error for %s in %s", event_id, room_id, exc_info=True)
     return False
-
-
-async def redact_messages(
-    client: AsyncClient,
-    room_id: str,
-    event_ids: list[str],
-) -> int:
-    """Redact multiple messages concurrently. Returns success count."""
-    if not event_ids:
-        return 0
-    results = await asyncio.gather(
-        *(redact_message(client, room_id, eid) for eid in event_ids),
-        return_exceptions=True,
-    )
-    return sum(1 for r in results if r is True)

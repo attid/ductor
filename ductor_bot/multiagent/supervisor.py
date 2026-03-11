@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from ductor_bot.config import AgentConfig, update_config_file_async
@@ -51,7 +52,9 @@ def _default_identity_check(_new: AgentConfig, _old: AgentConfig) -> bool:
     return False
 
 
-_TRANSPORT_IDENTITY_CHANGED: dict[str, object] = {
+_IdentityCheck = Callable[[AgentConfig, AgentConfig], bool]
+
+_TRANSPORT_IDENTITY_CHANGED: dict[str, _IdentityCheck] = {
     "telegram": _telegram_identity_check,
     "matrix": _matrix_identity_check,
 }
@@ -563,11 +566,8 @@ class AgentSupervisor:
         main = self._stacks.get("main")
         if main is None:
             return
-        ns = main.bot.notification_service
-        if ns is None:
-            return
         try:
-            await ns.notify_all(f"**[Supervisor]** {message}")
+            await main.bot.notification_service.notify_all(f"**[Supervisor]** {message}")
         except Exception:
             logger.exception("Failed to notify main agent")
 

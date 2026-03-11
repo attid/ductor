@@ -260,10 +260,6 @@ class Orchestrator:
         """Human-readable name for the active CLI provider."""
         return self._providers.active_provider_name
 
-    def _build_provider_info(self) -> list[dict[str, object]]:
-        """Build provider metadata for the API auth_ok response."""
-        return self._providers.build_provider_info(self._observers.codex_cache_obs)
-
     async def handle_message(self, key: SessionKey, text: str) -> OrchestratorResult:
         """Main entry point: route message to appropriate handler."""
         dispatch = _MessageDispatch(key=key, text=text, cmd=text.strip().lower())
@@ -453,25 +449,6 @@ class Orchestrator:
         logger.debug("Heartbeat flow starting")
         return await heartbeat_flow(self, key)
 
-    def submit_background_task(
-        self,
-        chat_id: int,
-        prompt: str,
-        message_id: int,
-        thread_id: int | None,
-    ) -> str:
-        """Submit a background task using the current provider/model. Returns task_id."""
-        from ductor_bot.cli.param_resolver import resolve_cli_config
-
-        if self._observers.background is None:
-            msg = "Background observer not initialized"
-            raise RuntimeError(msg)
-        exec_config = resolve_cli_config(self._config, self._observers.codex_cache)
-        sub = BackgroundSubmit(
-            chat_id=chat_id, prompt=prompt, message_id=message_id, thread_id=thread_id
-        )
-        return self._observers.background.submit(sub, exec_config)
-
     def submit_named_session(
         self,
         chat_id: int,
@@ -596,16 +573,6 @@ class Orchestrator:
 
         await ensure_docker(self)
 
-    async def _start_api_server(
-        self,
-        config: AgentConfig,
-        paths: DuctorPaths,
-    ) -> None:
-        """Initialize and start the direct WebSocket API server."""
-        from ductor_bot.orchestrator.lifecycle import start_api_server
-
-        await start_api_server(self, config, paths)
-
     def set_config_hot_reload_handler(
         self,
         handler: Callable[[AgentConfig, dict[str, object]], None],
@@ -681,20 +648,6 @@ class Orchestrator:
         )
 
         return await _handle_async_ia(self, result, chat_id=chat_id)
-
-    async def handle_task_question(
-        self,
-        task_id: str,
-        question: str,
-        task_preview: str,
-        key: SessionKey,
-    ) -> str:
-        """Inject a task worker's question into the main agent's session."""
-        from ductor_bot.orchestrator.injection import (
-            handle_task_question as _handle_question,
-        )
-
-        return await _handle_question(self, task_id, question, task_preview, key)
 
     async def inject_prompt(
         self,

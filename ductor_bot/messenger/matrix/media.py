@@ -87,11 +87,13 @@ async def download_matrix_media(
 
     # Determine file name and MIME type from event attributes
     body: str = getattr(event, "body", "") or ""
-    source_info: dict = getattr(event, "source", {})
-    content: dict = source_info.get("content", {}) if isinstance(source_info, dict) else {}
-    event_info: dict = content.get("info", {}) if isinstance(content, dict) else {}
-    mime: str = event_info.get("mimetype", "") or ""
-    msgtype: str = content.get("msgtype", "") or ""
+    source_info = getattr(event, "source", {})
+    content_raw = source_info.get("content", {}) if isinstance(source_info, dict) else {}
+    content_d: dict[str, object] = content_raw if isinstance(content_raw, dict) else {}
+    info_raw = content_d.get("info", {})
+    info_d: dict[str, object] = info_raw if isinstance(info_raw, dict) else {}
+    mime: str = str(info_d.get("mimetype", "") or "")
+    msgtype: str = str(content_d.get("msgtype", "") or "")
 
     # Derive file name
     file_name = _sanitize_filename(body) if body else ""
