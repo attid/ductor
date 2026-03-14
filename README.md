@@ -192,13 +192,15 @@ Main chat:  "Ask codex-agent to write tests for the API"
 ## Features
 
 - **Multi-transport** — run Telegram and Matrix simultaneously, or pick one
+- **Multi-language** — UI in English, Deutsch, Nederlands, Français, Русский, Español, Português
 - **Real-time streaming** — live message edits (Telegram) or segment-based output (Matrix)
-- **Provider switching** — `/model` to change provider/model, `@model` directives for inline targeting
+- **Provider switching** — `/model` to change provider/model (never blocks, even during active processes)
 - **Persistent memory** — plain Markdown files that survive across sessions
-- **Cron jobs** — in-process scheduler with timezone support, per-job overrides, quiet hours
+- **Cron jobs** — in-process scheduler with timezone support, per-job overrides, result routing to originating chat
 - **Webhooks** — `wake` (inject into active chat) and `cron_task` (isolated task run) modes
-- **Heartbeat** — proactive checks in active sessions with cooldown
-- **Config hot-reload** — most settings update without restart
+- **Heartbeat** — proactive checks with per-target settings, group/topic support, chat validation
+- **Image processing** — auto-resize and WebP conversion for incoming images (configurable)
+- **Config hot-reload** — most settings update without restart (including language, scene, image)
 - **Docker sandbox** — optional sidecar container with configurable host mounts
 - **Service manager** — Linux (systemd), macOS (launchd), Windows (Task Scheduler)
 - **Cross-tool skill sync** — shared skills across `~/.claude/`, `~/.codex/`, `~/.gemini/`
@@ -272,6 +274,28 @@ Matrix auth uses room and user allowlists in the `matrix` config block:
 - Room-level filtering (`allowed_rooms`) still applies.
 
 The bot logs in with password on first start, then persists `access_token` and `device_id` for subsequent runs. E2EE is supported via `matrix-nio[e2e]`.
+
+## Language
+
+ductor's UI (commands, status messages, onboarding) is available in multiple languages:
+
+| Code | Language |
+|---|---|
+| `en` | English (default) |
+| `de` | Deutsch |
+| `nl` | Nederlands |
+| `fr` | Français |
+| `ru` | Русский |
+| `es` | Español |
+| `pt` | Português |
+
+Set the language in `config.json`:
+
+```json
+{"language": "de"}
+```
+
+This is **hot-reloadable** — change the language without restarting the bot.
 
 ## Commands
 
