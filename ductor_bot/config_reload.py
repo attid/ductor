@@ -55,6 +55,8 @@ _HOT_RELOADABLE: frozenset[str] = frozenset(
         "allowed_user_ids",
         "allowed_group_ids",
         "group_mention_only",
+        "scene",
+        "image",
     }
 )
 
