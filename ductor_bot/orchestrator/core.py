@@ -152,9 +152,11 @@ class Orchestrator:
         self._cron_manager = CronManager(jobs_path=paths.cron_jobs_path)
         self._webhook_manager = WebhookManager(hooks_path=paths.webhooks_path)
         self._observers = ObserverManager(config, paths)
-        self._observers.heartbeat.set_heartbeat_handler(
-            lambda chat_id: self.handle_heartbeat(SessionKey(chat_id=chat_id))
-        )
+
+        async def _heartbeat_handler(chat_id: int, topic_id: int | None = None) -> str | None:
+            return await self.handle_heartbeat(SessionKey(chat_id=chat_id, topic_id=topic_id))
+
+        self._observers.heartbeat.set_heartbeat_handler(_heartbeat_handler)
         self._observers.heartbeat.set_busy_check(self._process_registry.has_active)
         stale_max = config.cli_timeout * 2
         self._observers.heartbeat.set_stale_cleanup(

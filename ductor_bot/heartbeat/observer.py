@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Callback signature: (chat_id, alert_text)
-HeartbeatResultCallback = Callable[[int, str], Awaitable[None]]
+# Callback signature: (chat_id, alert_text, topic_id)
+HeartbeatResultCallback = Callable[[int, str, int | None], Awaitable[None]]
 
 
 class HeartbeatObserver(BaseObserver):
@@ -33,7 +33,7 @@ class HeartbeatObserver(BaseObserver):
         super().__init__()
         self._config = config
         self._on_result: HeartbeatResultCallback | None = None
-        self._handle_heartbeat: Callable[[int], Awaitable[str | None]] | None = None
+        self._handle_heartbeat: Callable[[int, int | None], Awaitable[str | None]] | None = None
         self._is_chat_busy: Callable[[int], bool] | None = None
         self._stale_cleanup: Callable[[], Awaitable[int]] | None = None
 
@@ -47,7 +47,7 @@ class HeartbeatObserver(BaseObserver):
 
     def set_heartbeat_handler(
         self,
-        handler: Callable[[int], Awaitable[str | None]],
+        handler: Callable[[int, int | None], Awaitable[str | None]],
     ) -> None:
         """Set the function that executes a heartbeat turn (orchestrator.handle_heartbeat)."""
         self._handle_heartbeat = handler
@@ -136,11 +136,14 @@ class HeartbeatObserver(BaseObserver):
             logger.debug("Heartbeat skipped: quiet hours (%d:00 %s)", now_hour, tz.key)
             return
 
-        logger.debug("Heartbeat tick: checking %d chat(s)", len(self._config.allowed_user_ids))
+        target_count = len(self._config.allowed_user_ids) + len(self._hb.group_targets)
+        logger.debug("Heartbeat tick: checking %d chat(s)", target_count)
         for chat_id in self._config.allowed_user_ids:
             await self._run_for_chat(chat_id)
+        for target in self._hb.group_targets:
+            await self._run_for_chat(target.chat_id, target.topic_id)
 
-    async def _run_for_chat(self, chat_id: int) -> None:
+    async def _run_for_chat(self, chat_id: int, topic_id: int | None = None) -> None:
         """Execute a single heartbeat for one chat."""
         set_log_context(operation="hb", chat_id=chat_id)
 
@@ -152,7 +155,7 @@ class HeartbeatObserver(BaseObserver):
             return
 
         try:
-            alert_text = await self._handle_heartbeat(chat_id)
+            alert_text = await self._handle_heartbeat(chat_id, topic_id)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -164,7 +167,7 @@ class HeartbeatObserver(BaseObserver):
 
         if self._on_result:
             try:
-                await self._on_result(chat_id, alert_text)
+                await self._on_result(chat_id, alert_text, topic_id)
             except asyncio.CancelledError:
                 raise
             except Exception:

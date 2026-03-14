@@ -160,7 +160,25 @@ class TestWireIntegration:
         env = transport.deliver.call_args[0][0]
         assert env.origin == Origin.HEARTBEAT
         assert env.chat_id == 99
+        assert env.topic_id is None
         assert env.result_text == "Alert text"
+
+    async def test_heartbeat_callback_submits_topic_id_to_bus(self) -> None:
+        mgr = _make_observers()
+        bus = MessageBus()
+        transport = AsyncMock()
+        bus.register_transport(transport)
+        mgr.wire_to_bus(bus)
+
+        handler = mgr.heartbeat.set_result_handler.call_args[0][0]
+        await handler(-1001, "Group alert", 42)
+
+        transport.deliver.assert_awaited_once()
+        env = transport.deliver.call_args[0][0]
+        assert env.origin == Origin.HEARTBEAT
+        assert env.chat_id == -1001
+        assert env.topic_id == 42
+        assert env.result_text == "Group alert"
 
     async def test_cron_callback_submits_to_bus(self) -> None:
         mgr = _make_observers()

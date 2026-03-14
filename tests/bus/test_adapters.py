@@ -115,9 +115,19 @@ def test_from_heartbeat() -> None:
     env = from_heartbeat(200, "alert text")
     assert env.origin == Origin.HEARTBEAT
     assert env.chat_id == 200
+    assert env.topic_id is None
     assert env.delivery == DeliveryMode.UNICAST
     assert env.lock_mode == LockMode.NONE
     assert env.result_text == "alert text"
+
+
+def test_from_heartbeat_with_topic_id() -> None:
+    env = from_heartbeat(-1001, "group alert", topic_id=42)
+    assert env.origin == Origin.HEARTBEAT
+    assert env.chat_id == -1001
+    assert env.topic_id == 42
+    assert env.delivery == DeliveryMode.UNICAST
+    assert env.result_text == "group alert"
 
 
 def test_from_webhook_cron_result() -> None:

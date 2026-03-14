@@ -63,11 +63,12 @@ def from_cron_result(title: str, result: str, status: str) -> Envelope:
 # -- Heartbeat ----------------------------------------------------------------
 
 
-def from_heartbeat(chat_id: int, text: str) -> Envelope:
+def from_heartbeat(chat_id: int, text: str, topic_id: int | None = None) -> Envelope:
     """Convert a heartbeat alert."""
     return Envelope(
         origin=Origin.HEARTBEAT,
         chat_id=chat_id,
+        topic_id=topic_id,
         result_text=text,
         status="success",
         delivery=DeliveryMode.UNICAST,

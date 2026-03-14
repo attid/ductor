@@ -86,6 +86,13 @@ _DEFAULT_HEARTBEAT_PROMPT = (
 _DEFAULT_HEARTBEAT_ACK = "HEARTBEAT_OK"
 
 
+class HeartbeatTarget(BaseModel):
+    """A specific chat/topic to send heartbeat checks to."""
+
+    chat_id: int
+    topic_id: int | None = None
+
+
 class HeartbeatConfig(BaseModel):
     """Settings for the periodic heartbeat system."""
 
@@ -96,6 +103,7 @@ class HeartbeatConfig(BaseModel):
     quiet_end: int = 8
     prompt: str = _DEFAULT_HEARTBEAT_PROMPT
     ack_token: str = _DEFAULT_HEARTBEAT_ACK
+    group_targets: list[HeartbeatTarget] = Field(default_factory=list)
 
 
 class CleanupConfig(BaseModel):

@@ -191,8 +191,8 @@ class ObserverManager:
 
             self.cron.set_result_handler(_on_cron)
 
-        async def _on_heartbeat(chat_id: int, text: str) -> None:
-            await bus.submit(from_heartbeat(chat_id, text))
+        async def _on_heartbeat(chat_id: int, text: str, topic_id: int | None = None) -> None:
+            await bus.submit(from_heartbeat(chat_id, text, topic_id))
 
         self.heartbeat.set_result_handler(_on_heartbeat)
 
