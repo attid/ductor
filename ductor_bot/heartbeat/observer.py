@@ -133,11 +133,11 @@ class HeartbeatObserver(BaseObserver):
         """Return True if the target has a custom interval that has not yet elapsed."""
         if target.interval_minutes is None:
             return False
-        key = (target.chat_id, target.topic_id)
+        key = (target.chat_id or 0, target.topic_id)
         last_run = self._target_last_run.get(key, 0.0)
         if (now - last_run) < target.interval_minutes * 60:
             logger.debug(
-                "Heartbeat target %d skipped: custom interval not elapsed",
+                "Heartbeat target %s skipped: custom interval not elapsed",
                 target.chat_id,
             )
             return True
@@ -212,6 +212,8 @@ class HeartbeatObserver(BaseObserver):
         """Iterate group targets with validation, interval gating, and per-target settings."""
         now = time.time()
         for target in self._hb.group_targets:
+            if target.chat_id is None:
+                continue
             if not await self._validate_target(target.chat_id):
                 continue
             if self._should_skip_target_interval(target, now):
@@ -227,7 +229,7 @@ class HeartbeatObserver(BaseObserver):
                 quiet_end=quiet_end,
             )
             if target.interval_minutes is not None:
-                self._target_last_run[(target.chat_id, target.topic_id)] = now
+                self._target_last_run[(target.chat_id or 0, target.topic_id)] = now
 
     def _is_target_quiet(
         self, chat_id: int, quiet_start: int | None, quiet_end: int | None

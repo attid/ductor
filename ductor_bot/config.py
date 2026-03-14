@@ -92,7 +92,7 @@ class HeartbeatTarget(BaseModel):
     All optional fields override the global HeartbeatConfig when set.
     """
 
-    chat_id: int
+    chat_id: int | None = None
     topic_id: int | None = None
     prompt: str | None = None
     ack_token: str | None = None
@@ -111,7 +111,15 @@ class HeartbeatConfig(BaseModel):
     quiet_end: int = 8
     prompt: str = _DEFAULT_HEARTBEAT_PROMPT
     ack_token: str = _DEFAULT_HEARTBEAT_ACK
-    group_targets: list[HeartbeatTarget] = Field(default_factory=list)
+    group_targets: list[HeartbeatTarget] = Field(
+        default_factory=lambda: [
+            HeartbeatTarget(
+                chat_id=None,
+                topic_id=None,
+                prompt="Replace chat_id with your group ID to enable this target.",
+            ),
+        ]
+    )
 
 
 class CleanupConfig(BaseModel):

@@ -276,9 +276,9 @@ class TestHeartbeatGroupTargets:
 
         result_handler.assert_awaited_once_with(-1001, "group alert", 7)
 
-    async def test_empty_group_targets_is_backward_compatible(self) -> None:
+    async def test_default_group_targets_with_null_chat_id_are_skipped(self) -> None:
         config = _make_config()
-        assert config.heartbeat.group_targets == []
+        assert all(t.chat_id is None for t in config.heartbeat.group_targets)
         obs = HeartbeatObserver(config)
         handler = AsyncMock(return_value=None)
         obs.set_heartbeat_handler(handler)
