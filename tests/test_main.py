@@ -121,6 +121,32 @@ class TestLoadConfig:
         merged = json.loads((config_dir / "config.json").read_text(encoding="utf-8"))
         assert merged["gemini_api_key"] == "null"
 
+    def test_env_overrides_rule_sync_interval(self, tmp_path: Path) -> None:
+        from ductor_bot.__main__ import load_config
+
+        home = tmp_path / ".ductor"
+        config_dir = home / "config"
+        config_dir.mkdir(parents=True)
+        fw = tmp_path / "framework"
+        fw.mkdir()
+        (config_dir / "config.json").write_text(
+            json.dumps({"telegram_token": "TOKEN", "provider": "claude"}),
+            encoding="utf-8",
+        )
+
+        with (
+            patch("ductor_bot.__main__.resolve_paths") as mock_paths,
+            patch("ductor_bot.__main__.init_workspace"),
+            patch.dict("os.environ", {"DUCTOR_RULE_SYNC_INTERVAL_SECONDS": "6000"}),
+        ):
+            from ductor_bot.workspace.paths import DuctorPaths
+
+            paths = DuctorPaths(ductor_home=home, home_defaults=fw / "workspace", framework_root=fw)
+            mock_paths.return_value = paths
+            config = load_config()
+
+        assert config.rule_sync_interval_seconds == 6000.0
+
 
 class TestIsConfigured:
     def test_unconfigured_when_no_config(self, tmp_path: Path) -> None:

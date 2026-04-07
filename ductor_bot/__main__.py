@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
 import signal
 import sys
@@ -54,6 +55,8 @@ logger = logging.getLogger(__name__)
 
 _console = Console()
 
+_RULE_SYNC_INTERVAL_ENV = "DUCTOR_RULE_SYNC_INTERVAL_SECONDS"
+
 
 # ---------------------------------------------------------------------------
 # Config helpers
@@ -97,6 +100,30 @@ _IS_CONFIGURED_CHECKS: dict[str, Callable[[dict[str, object]], bool]] = {
     "telegram": _is_configured_telegram,
     "matrix": _is_configured_matrix,
 }
+
+
+def _apply_env_overrides(config_data: dict[str, object]) -> dict[str, object]:
+    """Apply supported environment variable overrides to loaded config data."""
+    overridden = dict(config_data)
+
+    raw_interval = os.environ.get(_RULE_SYNC_INTERVAL_ENV, "").strip()
+    if raw_interval:
+        try:
+            interval = float(raw_interval)
+        except ValueError:
+            logger.warning("Invalid %s=%r, expected a non-negative number", _RULE_SYNC_INTERVAL_ENV, raw_interval)
+        else:
+            if interval < 0:
+                logger.warning(
+                    "Ignoring %s=%r because it is negative",
+                    _RULE_SYNC_INTERVAL_ENV,
+                    raw_interval,
+                )
+            else:
+                overridden["rule_sync_interval_seconds"] = interval
+                logger.info("%s override applied: %.3fs", _RULE_SYNC_INTERVAL_ENV, interval)
+
+    return overridden
 
 
 def load_config() -> AgentConfig:
@@ -149,6 +176,8 @@ def load_config() -> AgentConfig:
     if changed:
         atomic_json_save(config_path, merged)
         logger.info("Extended config with new default fields")
+
+    merged = _apply_env_overrides(merged)
 
     init_workspace(paths)
     return AgentConfig.model_validate(merged)
@@ -326,7 +355,7 @@ _Action = Callable[[], None]
 
 
 def main() -> None:
-    """CLI entry point."""
+    """CLI point."""
     args = sys.argv[1:]
     commands = [a for a in args if not a.startswith("-")]
     verbose = "--verbose" in args or "-v" in args

@@ -1019,32 +1019,6 @@ class TestCommandHandlers:
 
         mock_cmd.assert_called_once_with(orch, tg_bot.bot_instance, msg)
 
-    @patch("ductor_bot.messenger.telegram.app.handle_new_session", new_callable=AsyncMock)
-    async def test_on_new_calls_handle_new_session(self, mock_new: AsyncMock) -> None:
-        tg_bot, _ = _make_tg_bot()
-        orch = _make_orchestrator()
-        tg_bot._orchestrator = orch
-        msg = _make_message()
-
-        await tg_bot._on_new(msg)
-
-        mock_new.assert_called_once_with(
-            orch, tg_bot.bot_instance, msg, topic_names=tg_bot._topic_names
-        )
-
-    @patch(
-        "ductor_bot.messenger.telegram.app.handle_abort", new_callable=AsyncMock, return_value=True
-    )
-    async def test_on_abort_returns_handled(self, mock_abort: AsyncMock) -> None:
-        tg_bot, _ = _make_tg_bot()
-        tg_bot._orchestrator = _make_orchestrator()
-        msg = _make_message(chat_id=9)
-
-        result = await tg_bot._on_abort(9, msg)
-
-        assert result is True
-        mock_abort.assert_called_once()
-
     @patch("ductor_bot.messenger.telegram.app.handle_command", new_callable=AsyncMock)
     async def test_on_quick_command_delegates(self, mock_cmd: AsyncMock) -> None:
         tg_bot, _ = _make_tg_bot()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from importlib.metadata import distribution
 from typing import Literal
@@ -41,4 +42,6 @@ def detect_install_mode() -> InstallMode:
 
 def is_upgradeable() -> bool:
     """Return True if the bot can self-upgrade (pipx or pip, not dev)."""
+    if os.environ.get("DUCTOR_NO_UPDATE_CHECK", "").strip() not in ("", "0"):
+        return False
     return detect_install_mode() != "dev"

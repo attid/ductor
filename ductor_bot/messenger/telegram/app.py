@@ -203,8 +203,10 @@ class TelegramBot:
 
         allowed = set(config.allowed_user_ids)
         allowed_groups = set(config.allowed_group_ids)
+        allowed_group_users = set(config.allowed_group_user_ids)
         self._allowed_users = allowed
         self._allowed_groups = allowed_groups
+        self._allowed_group_users = allowed_group_users
         self._chat_tracker: ChatTracker | None = None  # set in _on_startup
         self._topic_names = TopicNameCache()
         self._lock_pool = lock_pool or LockPool()
@@ -221,12 +223,25 @@ class TelegramBot:
         self._sequential.set_abort_handler(self._on_abort)
         self._sequential.set_abort_all_handler(self._on_abort_all)
         self._sequential.set_quick_command_handler(self._on_quick_command)
+
         on_rejected = self._on_group_rejected
-        auth = AuthMiddleware(allowed, allowed_group_ids=allowed_groups, on_rejected=on_rejected)
+        auth = AuthMiddleware(
+            allowed,
+            group_mention_only=config.group_mention_only,
+            allowed_group_ids=allowed_groups,
+            allowed_group_user_ids=allowed_group_users,
+            on_rejected=on_rejected,
+        )
         self._router.message.outer_middleware(auth)
         self._router.message.outer_middleware(self._sequential)
         self._router.callback_query.outer_middleware(
-            AuthMiddleware(allowed, allowed_group_ids=allowed_groups, on_rejected=on_rejected)
+            AuthMiddleware(
+                allowed,
+                group_mention_only=config.group_mention_only,
+                allowed_group_ids=allowed_groups,
+                allowed_group_user_ids=allowed_group_users,
+                on_rejected=on_rejected,
+            )
         )
 
         self._register_handlers()
@@ -367,6 +382,10 @@ class TelegramBot:
             self._allowed_groups.update(config.allowed_group_ids)
             logger.info("Auth hot-reloaded: allowed_group_ids (%d)", len(self._allowed_groups))
             self._group_audit_task = asyncio.create_task(self._fire_audit())
+        if "allowed_group_user_ids" in hot:
+            self._allowed_group_users.clear()
+            self._allowed_group_users.update(config.allowed_group_user_ids)
+            logger.info("Auth hot-reloaded: allowed_group_user_ids (%d)", len(self._allowed_group_users))
         if "language" in hot:
             _rebuild_commands()
             self._lang_sync_task = asyncio.create_task(self._sync_commands())

@@ -118,8 +118,13 @@ class ObserverManager:
             await self.webhook.start()
         await self.cleanup.start()
 
-        self._rule_sync_task = asyncio.create_task(watch_rule_files(self._paths.workspace))
-        logger.info("Rule file watcher started (CLAUDE.md <-> AGENTS.md <-> GEMINI.md)")
+        if self._config.rule_sync_interval_seconds > 0:
+            self._rule_sync_task = asyncio.create_task(
+                watch_rule_files(
+                    self._paths.workspace, interval=self._config.rule_sync_interval_seconds
+                )
+            )
+            logger.info("Rule file watcher started (CLAUDE.md <-> AGENTS.md <-> GEMINI.md)")
 
         self._skill_sync_task = asyncio.create_task(
             watch_skill_sync(self._paths, docker_active=bool(docker_container))

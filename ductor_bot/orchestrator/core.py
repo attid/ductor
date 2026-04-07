@@ -60,7 +60,8 @@ from ductor_bot.session import SessionKey, SessionManager
 from ductor_bot.session.manager import SessionData
 from ductor_bot.session.named import NamedSessionRegistry
 from ductor_bot.webhook.manager import WebhookManager
-from ductor_bot.workspace.paths import DuctorPaths
+from ductor_bot.workspace.paths import DuctorPaths, resolve_paths
+from ductor_bot.workspace.init import watch_rule_files
 
 if TYPE_CHECKING:
     from ductor_bot.background import BackgroundObserver

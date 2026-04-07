@@ -39,13 +39,13 @@ Orchestrator-routed commands:
 
 ### `AuthMiddleware`
 
-- private chats: requires `user_id in allowed_user_ids`
-- groups/supergroups: requires both
-  - `group_id in allowed_group_ids`
-  - `user_id in allowed_user_ids`
-- optional rejected-group callback feeds `ChatTracker`
-
-`group_mention_only` is not auth. It is applied later as message-content gating.
+- Drops message/callback updates from unauthorized users/groups.
+- **Private chats**: requires `user_id in allowed_user_ids`.
+- **Groups/supergroups**:
+  - If `group_mention_only=false`: requires **both** `group_id in allowed_group_ids` and `user_id in allowed_user_ids`.
+  - If `group_mention_only=true`: bypasses strict `allowed_user_ids` check (mentions gate access), but still enforces `allowed_group_ids` and/or `allowed_group_user_ids` when configured.
+- Unauthorized attempts are logged to the console.
+- Optional rejected-group callback feeds `ChatTracker`.
 
 Media messages in groups also respect `group_mention_only`:
 

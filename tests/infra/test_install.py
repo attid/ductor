@@ -92,3 +92,17 @@ class TestIsUpgradeable:
     def test_dev_is_not_upgradeable(self) -> None:
         with patch("ductor_bot.infra.install.detect_install_mode", return_value="dev"):
             assert is_upgradeable() is False
+
+    def test_env_var_disables_upgrade_check(self) -> None:
+        with (
+            patch("ductor_bot.infra.install.detect_install_mode", return_value="pip"),
+            patch.dict("os.environ", {"DUCTOR_NO_UPDATE_CHECK": "1"}),
+        ):
+            assert is_upgradeable() is False
+
+    def test_env_var_zero_does_not_disable(self) -> None:
+        with (
+            patch("ductor_bot.infra.install.detect_install_mode", return_value="pip"),
+            patch.dict("os.environ", {"DUCTOR_NO_UPDATE_CHECK": "0"}),
+        ):
+            assert is_upgradeable() is True

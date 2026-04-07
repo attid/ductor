@@ -291,6 +291,7 @@ class AgentConfig(BaseModel):
     cli_timeout: float = 1800.0
     reasoning_effort: str = "medium"
     file_access: str = "all"
+    rule_sync_interval_seconds: float = Field(default=10.0, ge=0.0)
     gemini_api_key: str | None = None
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
@@ -313,6 +314,7 @@ class AgentConfig(BaseModel):
     telegram_token: str = ""
     allowed_user_ids: list[int] = Field(default_factory=list)
     allowed_group_ids: list[int] = Field(default_factory=list)
+    allowed_group_user_ids: list[int] = Field(default_factory=list)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
     @field_validator("gemini_api_key", mode="before")

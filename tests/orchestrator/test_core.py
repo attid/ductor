@@ -266,6 +266,33 @@ async def test_create_starts_cron_and_heartbeat(
     assert result._observers._rule_sync_task is not None
 
 
+async def test_create_skips_rule_sync_when_interval_disabled(
+    workspace: tuple[DuctorPaths, AgentConfig],
+) -> None:
+    paths, config = workspace
+    config.rule_sync_interval_seconds = 0.0
+    claude_auth = AuthResult("claude", AuthStatus.AUTHENTICATED)
+
+    with (
+        patch(
+            "ductor_bot.orchestrator.core.resolve_paths",
+            return_value=paths,
+        ),
+        patch(
+            "ductor_bot.cli.auth.check_all_auth",
+            return_value={"claude": claude_auth},
+        ),
+        patch(
+            "ductor_bot.orchestrator.core.watch_rule_files",
+            new_callable=AsyncMock,
+        ) as watch_rule_files_mock,
+    ):
+        result = await Orchestrator.create(config)
+
+    assert result._observers._rule_sync_task is None
+    watch_rule_files_mock.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # shutdown()
 # ---------------------------------------------------------------------------

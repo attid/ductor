@@ -91,20 +91,37 @@ class AuthMiddleware(BaseMiddleware):
     """Outer middleware: silently drop messages from unauthorized users/groups.
 
     In private chats only ``allowed_user_ids`` is checked.
-    In group/supergroup chats **both** the group (``allowed_group_ids``)
-    and the sender (``allowed_user_ids``) must be allowlisted.
+    When *group_mention_only* is True, messages in group/supergroup chats
+    bypass the private user-ID check — the mention filter in ``_resolve_text``
+    already gates access.  However, if *allowed_group_ids* or
+    *allowed_group_user_ids* are non-empty, the group and/or user must still
+    be whitelisted.
     """
 
     def __init__(
         self,
         allowed_user_ids: set[int],
         *,
+        group_mention_only: bool = False,
         allowed_group_ids: set[int] | None = None,
+        allowed_group_user_ids: set[int] | None = None,
         on_rejected: RejectedCallback | None = None,
     ) -> None:
-        self._allowed_users = allowed_user_ids
-        self._allowed_groups = allowed_group_ids or set()
+        self._allowed = allowed_user_ids
+        self._group_mention_only = group_mention_only
+        self._allowed_group_ids = allowed_group_ids or set()
+        self._allowed_group_user_ids = allowed_group_user_ids or set()
         self._on_rejected = on_rejected
+
+    @staticmethod
+    def _resolve_chat_info(event: TelegramObject) -> tuple[int | None, str | None, Any | None]:
+        """Return ``(chat_id, chat_type, chat_obj)`` for Message/CallbackQuery events."""
+        if isinstance(event, Message):
+            return event.chat.id, event.chat.type, event.chat
+        if isinstance(event, CallbackQuery) and event.message:
+            chat = getattr(event.message, "chat", None)
+            return chat.id if chat else None, chat.type if chat else None, chat
+        return None, None, None
 
     async def __call__(
         self,
@@ -118,26 +135,44 @@ class AuthMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         if not user:
+            logger.warning("Auth drop: no from_user on event=%s", type(event).__name__)
             return None
 
-        # Resolve chat: Message.chat directly, CallbackQuery via .message.chat.
-        chat = None
-        if isinstance(event, Message):
-            chat = event.chat
-        elif isinstance(event, CallbackQuery) and event.message is not None:
-            chat = getattr(event.message, "chat", None)
-
-        chat_type = chat.type if chat else None
+        chat_id, chat_type, chat = self._resolve_chat_info(event)
 
         if chat_type in ("group", "supergroup"):
-            group_id = chat.id if chat else None
-            if group_id not in self._allowed_groups:
+            # Check group ID whitelist (fail-closed)
+            if chat_id not in self._allowed_group_ids:
+                logger.warning(
+                    "Auth drop: unauthorized group chat_id=%d title=%s for user=%d",
+                    chat_id, chat.title if chat else "unknown", user.id
+                )
                 if self._on_rejected and chat:
-                    self._on_rejected(chat.id, chat_type, chat.title or "")
+                    self._on_rejected(chat_id, chat_type, chat.title or "")
                 return None
-            if user.id not in self._allowed_users:
-                return None
-        elif user.id not in self._allowed_users:
+
+            # If not group_mention_only, fallback to strict user whitelist
+            if not self._group_mention_only:
+                if user.id not in self._allowed:
+                    logger.warning(
+                        "Auth drop: unauthorized group message user=%d in chat=%d", user.id, chat_id
+                    )
+                    return None
+            else:
+                # In mention-only mode, still check group-specific user whitelist if set
+                if self._allowed_group_user_ids and user.id not in self._allowed_group_user_ids:
+                    logger.warning(
+                        "Auth drop: unauthorized group user=%d in whitelisted chat=%d", user.id, chat_id
+                    )
+                    return None
+
+            return await handler(event, data)
+
+        # Private chats
+        if user.id not in self._allowed:
+            logger.warning(
+                "Auth drop: unauthorized user=%d in private chat=%d", user.id, chat_id
+            )
             return None
 
         return await handler(event, data)
