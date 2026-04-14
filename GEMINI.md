@@ -11,7 +11,7 @@ Stack:
 - Pydantic 2.x
 - asyncio
 
-## Development Commands
+## Development  Commands
 
 ```bash
 # Setup
