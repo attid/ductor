@@ -43,7 +43,7 @@ Orchestrator-routed commands:
 - **Private chats**: requires `user_id in allowed_user_ids`.
 - **Groups/supergroups**:
   - If `group_mention_only=false`: requires **both** `group_id in allowed_group_ids` and `user_id in allowed_user_ids`.
-  - If `group_mention_only=true`: bypasses strict `allowed_user_ids` check (mentions gate access), but still enforces `allowed_group_ids` and/or `allowed_group_user_ids` when configured.
+  - If `group_mention_only=true`: bypasses strict `allowed_user_ids` check (mentions gate access), but still enforces `allowed_group_ids`.
 - Unauthorized attempts are logged to the console.
 - Optional rejected-group callback feeds `ChatTracker`.
 

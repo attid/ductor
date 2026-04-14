@@ -92,10 +92,9 @@ class AuthMiddleware(BaseMiddleware):
 
     In private chats only ``allowed_user_ids`` is checked.
     When *group_mention_only* is True, messages in group/supergroup chats
-    bypass the private user-ID check — the mention filter in ``_resolve_text``
-    already gates access.  However, if *allowed_group_ids* or
-    *allowed_group_user_ids* are non-empty, the group and/or user must still
-    be whitelisted.
+    bypass the per-user whitelist — the mention filter in ``_resolve_text``
+    already gates access — but the group must still be in
+    ``allowed_group_ids``.
     """
 
     def __init__(
@@ -104,13 +103,11 @@ class AuthMiddleware(BaseMiddleware):
         *,
         group_mention_only: bool = False,
         allowed_group_ids: set[int] | None = None,
-        allowed_group_user_ids: set[int] | None = None,
         on_rejected: RejectedCallback | None = None,
     ) -> None:
         self._allowed = allowed_user_ids
         self._group_mention_only = group_mention_only
         self._allowed_group_ids = allowed_group_ids or set()
-        self._allowed_group_user_ids = allowed_group_user_ids or set()
         self._on_rejected = on_rejected
 
     @staticmethod
@@ -152,19 +149,11 @@ class AuthMiddleware(BaseMiddleware):
                 return None
 
             # If not group_mention_only, fallback to strict user whitelist
-            if not self._group_mention_only:
-                if user.id not in self._allowed:
-                    logger.warning(
-                        "Auth drop: unauthorized group message user=%d in chat=%d", user.id, chat_id
-                    )
-                    return None
-            else:
-                # In mention-only mode, still check group-specific user whitelist if set
-                if self._allowed_group_user_ids and user.id not in self._allowed_group_user_ids:
-                    logger.warning(
-                        "Auth drop: unauthorized group user=%d in whitelisted chat=%d", user.id, chat_id
-                    )
-                    return None
+            if not self._group_mention_only and user.id not in self._allowed:
+                logger.warning(
+                    "Auth drop: unauthorized group message user=%d in chat=%d", user.id, chat_id
+                )
+                return None
 
             return await handler(event, data)
 

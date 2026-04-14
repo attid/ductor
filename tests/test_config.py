@@ -35,7 +35,6 @@ def test_agent_config_defaults() -> None:
     assert cfg.telegram_token == ""
     assert cfg.allowed_user_ids == []
     assert cfg.allowed_group_ids == []
-    assert cfg.allowed_group_user_ids == []
 
 
 def test_agent_config_normalizes_nullish_gemini_api_key() -> None:

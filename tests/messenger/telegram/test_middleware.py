@@ -276,40 +276,6 @@ class TestAuthMiddleware:
         handler.assert_called_once()
         assert result == "ok"
 
-    async def test_group_user_whitelist_blocks_unknown_user(self) -> None:
-        """User not in allowed_group_user_ids is blocked in whitelisted group."""
-        from ductor_bot.messenger.telegram.middleware import AuthMiddleware
-
-        mw = AuthMiddleware(
-            allowed_user_ids=set(),
-            group_mention_only=True,
-            allowed_group_ids={-100123},
-            allowed_group_user_ids={555},
-        )
-        handler = AsyncMock()
-        msg = _make_message(chat_id=-100123, user_id=777, chat_type="supergroup")
-
-        result = await mw(handler, msg, {})
-        handler.assert_not_called()
-        assert result is None
-
-    async def test_group_user_whitelist_passes_known_user(self) -> None:
-        """Whitelisted user in whitelisted group passes."""
-        from ductor_bot.messenger.telegram.middleware import AuthMiddleware
-
-        mw = AuthMiddleware(
-            allowed_user_ids=set(),
-            group_mention_only=True,
-            allowed_group_ids={-100123},
-            allowed_group_user_ids={555},
-        )
-        handler = AsyncMock(return_value="ok")
-        msg = _make_message(chat_id=-100123, user_id=555, chat_type="supergroup")
-
-        result = await mw(handler, msg, {})
-        handler.assert_called_once()
-        assert result == "ok"
-
     async def test_empty_whitelists_block_all_groups(self) -> None:
         """Empty allowed_group_ids means no groups are allowed (fail-closed)."""
         from ductor_bot.messenger.telegram.middleware import AuthMiddleware
