@@ -1,6 +1,6 @@
 services:
   ductor:
-    image: ghcr.io/montelibero/ductor:latest
+    image: ghcr.io/attid/ductor:latest
     container_name: ductor
     restart: unless-stopped
     environment:
