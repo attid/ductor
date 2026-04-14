@@ -6,9 +6,11 @@ services:
     environment:
       DUCTOR_HOME: /home/node/.ductor
       CODEX_HOME: /home/node/.codex
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       TZ: UTC
     volumes:
       - ./.ductor:/home/node/.ductor
+      - ./.gemini:/home/node/.gemini
       - ${HOME}/.codex:/home/node/.codex
       - ${HOME}/.claude:/home/node/.claude
       - ./projects:/home/node/.ductor/workspace/projects
