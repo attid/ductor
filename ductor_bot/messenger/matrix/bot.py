@@ -184,16 +184,16 @@ class MatrixBot:
         """Route Matrix startup-lifecycle notifications (#64).
 
         ``topic_id`` is ignored — Matrix rooms have no topic-thread concept.
-        Targets without a resolvable room fall back to ``notify_all``.
+        Fallback policy:
+          * ``startup_targets`` empty (default) -> ``notify_all``.
+          * ``startup_targets`` non-empty but every entry disabled -> explicit
+            silence (no fallback).
         """
-        targets = [
-            tgt
-            for tgt in self._config.notifications.startup_targets
-            if tgt.enabled and tgt.chat_id is not None
-        ]
-        if not targets:
+        configured = self._config.notifications.startup_targets
+        if not configured:
             await self._notification_service.notify_all(text)
             return
+        targets = [tgt for tgt in configured if tgt.enabled and tgt.chat_id is not None]
         for target in targets:
             try:
                 assert target.chat_id is not None
@@ -210,16 +210,17 @@ class MatrixBot:
 
         ``topic_id`` is ignored — Matrix rooms have no topic-thread concept.
         Mirrors ``notify_startup`` but reads ``notifications.upgrade_targets``
-        so users can silence/route upgrade events independently.
+        so users can silence/route upgrade events independently. Fallback
+        policy:
+          * ``upgrade_targets`` empty (default) -> ``broadcast``.
+          * ``upgrade_targets`` non-empty but every entry disabled -> explicit
+            silence (no fallback).
         """
-        targets = [
-            tgt
-            for tgt in self._config.notifications.upgrade_targets
-            if tgt.enabled and tgt.chat_id is not None
-        ]
-        if not targets:
+        configured = self._config.notifications.upgrade_targets
+        if not configured:
             await self.broadcast(text)
             return
+        targets = [tgt for tgt in configured if tgt.enabled and tgt.chat_id is not None]
         for target in targets:
             try:
                 assert target.chat_id is not None

@@ -103,9 +103,15 @@ async def test_notify_startup_skips_disabled_and_missing_chat_id(
     assert send_rich.await_args_list[0].args[1] == -100222
 
 
-async def test_notify_startup_falls_back_when_all_targets_disabled(
+async def test_notify_startup_silences_when_all_targets_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Regression for v0.16.1 MED #3.
+
+    When the user lists targets explicitly and disables all of them, that
+    is an explicit silence signal. It must NOT fall through to
+    ``notify_all`` (which would deliver anyway — the opposite of silence).
+    """
     bot, send_rich, notify_all, _ = _make_bot(
         monkeypatch,
         startup_targets=[
@@ -116,7 +122,23 @@ async def test_notify_startup_falls_back_when_all_targets_disabled(
 
     await bot.notify_startup("startup note")
 
-    notify_all.assert_awaited_once_with("startup note")
+    notify_all.assert_not_called()
+    send_rich.assert_not_called()
+
+
+async def test_notify_upgrade_silences_when_all_targets_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for v0.16.1 MED #3 — mirror of the startup case."""
+    bot, send_rich, _, broadcast = _make_bot(
+        monkeypatch,
+        upgrade_targets=[NotificationTarget(enabled=False, chat_id=-100123, topic_id=None)],
+    )
+
+    opts = SendRichOpts(reply_markup=None)
+    await bot.notify_upgrade("upgrade available", opts)
+
+    broadcast.assert_not_called()
     send_rich.assert_not_called()
 
 

@@ -104,6 +104,34 @@ async def test_notify_upgrade_falls_back_to_broadcast_when_no_targets() -> None:
     notify.assert_not_called()
 
 
+async def test_notify_startup_silences_when_all_targets_disabled() -> None:
+    """Regression for v0.16.1 MED #3.
+
+    Users who list targets but disable them all intend silence — do not
+    fall through to ``notify_all`` (that is the opposite of silence).
+    """
+    bot, notify, notify_all, _ = _make_bot(
+        startup_targets=[NotificationTarget(enabled=False, chat_id=123, topic_id=None)],
+    )
+
+    await bot.notify_startup("startup note")
+
+    notify_all.assert_not_called()
+    notify.assert_not_called()
+
+
+async def test_notify_upgrade_silences_when_all_targets_disabled() -> None:
+    """Regression for v0.16.1 MED #3 — mirror of the startup case."""
+    bot, notify, _, broadcast = _make_bot(
+        upgrade_targets=[NotificationTarget(enabled=False, chat_id=456, topic_id=None)],
+    )
+
+    await bot.notify_upgrade("update available")
+
+    broadcast.assert_not_called()
+    notify.assert_not_called()
+
+
 async def test_matrix_startup_wires_notify_upgrade_on_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

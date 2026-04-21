@@ -310,20 +310,20 @@ class TelegramBot:
     async def notify_startup(self, text: str) -> None:
         """Route startup-lifecycle notifications (#64).
 
-        When `notifications.startup_targets` has at least one enabled
-        target with a valid `chat_id`, send only to those targets.
-        Otherwise fall back to `notify_all` (current behaviour). Per-target
-        failures are swallowed at warning level so a single bad target
-        does not mask the rest.
+        Fallback policy:
+          * ``startup_targets`` empty (default) -> broadcast via ``notify_all``.
+          * ``startup_targets`` non-empty but every entry disabled -> explicit
+            silence (no fallback). This is how users opt out of lifecycle
+            notifications without losing upgrade routing.
+
+        Per-target failures are swallowed at warning level so a single bad
+        target does not mask the rest.
         """
-        targets = [
-            t
-            for t in self._config.notifications.startup_targets
-            if t.enabled and t.chat_id is not None
-        ]
-        if not targets:
+        configured = self._config.notifications.startup_targets
+        if not configured:
             await self._notification_service.notify_all(text)
             return
+        targets = [t for t in configured if t.enabled and t.chat_id is not None]
         for target in targets:
             try:
                 assert target.chat_id is not None
@@ -344,19 +344,17 @@ class TelegramBot:
     async def notify_upgrade(self, text: str, opts: SendRichOpts | None = None) -> None:
         """Route upgrade-available notifications (#64).
 
-        When `notifications.upgrade_targets` has at least one enabled
-        target with a valid `chat_id`, send only to those targets
-        (preserving ``opts`` such as the upgrade inline keyboard).
-        Otherwise fall back to `broadcast` (current behaviour).
+        Fallback policy (mirrors ``notify_startup``):
+          * ``upgrade_targets`` empty (default) -> ``broadcast``.
+          * ``upgrade_targets`` non-empty but every entry disabled -> explicit
+            silence (no fallback).
+        ``opts`` (reply_markup, etc.) is preserved on each per-target send.
         """
-        targets = [
-            t
-            for t in self._config.notifications.upgrade_targets
-            if t.enabled and t.chat_id is not None
-        ]
-        if not targets:
+        configured = self._config.notifications.upgrade_targets
+        if not configured:
             await self.broadcast(text, opts)
             return
+        targets = [t for t in configured if t.enabled and t.chat_id is not None]
         for target in targets:
             try:
                 assert target.chat_id is not None
