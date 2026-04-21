@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest  # noqa: TC002  -- runtime fixture type (caplog)
 
+from ductor_bot.bus.lock_pool import LockPool
 from ductor_bot.cli.types import AgentResponse
 from ductor_bot.config import MemoryCompactionConfig, MemoryFlushConfig
 from ductor_bot.orchestrator.memory_flush import MemoryFlusher
@@ -204,3 +206,77 @@ async def test_memory_flusher_falls_back_on_bad_prompt_placeholder(
     assert "40" in compact_call.prompt
     # Warning was logged.
     assert any("invalid placeholder" in rec.message for rec in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# MED #6 -- LockPool integration (serialize against user turns)
+# ---------------------------------------------------------------------------
+
+
+async def test_memory_flusher_serializes_concurrent_flushes_via_lock_pool(
+    tmp_path: Path,
+) -> None:
+    """Two concurrent ``maybe_flush`` calls on the same SessionKey serialize.
+
+    Without the lock pool, both would race and spawn parallel CLI subprocesses
+    resuming the same ``session_id``. With the pool attached, only one
+    ``cli.execute`` is in-flight at a time.
+    """
+    active = 0
+    peak = 0
+    release = asyncio.Event()
+
+    async def blocking_execute(_req: object) -> AgentResponse:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        # Hold the lock until the second task has had a chance to queue.
+        try:
+            await release.wait()
+        finally:
+            active -= 1
+        return AgentResponse(result="")
+
+    flusher, cli = _make_flusher(
+        tmp_path,
+        compact_cfg=MemoryCompactionConfig(enabled=False),
+        flush_cfg=MemoryFlushConfig(dedup_seconds=0),
+    )
+    cli.execute.side_effect = blocking_execute
+    lock_pool = LockPool()
+    flusher.set_lock_pool(lock_pool)
+
+    key = SessionKey(chat_id=101)
+    session = _session_with_id("sess-abc")
+
+    # Kick off two concurrent flushes, each marking a boundary first.
+    async def one_flush() -> None:
+        flusher.mark_boundary(key)
+        await flusher.maybe_flush(key, session)
+
+    task_a = asyncio.create_task(one_flush())
+    task_b = asyncio.create_task(one_flush())
+    # Let both tasks reach the lock acquisition.
+    await asyncio.sleep(0.05)
+    # Release and wait.
+    release.set()
+    await asyncio.gather(task_a, task_b)
+
+    # Peak concurrency must never exceed 1 -- the lock serializes them.
+    assert peak == 1
+    assert cli.execute.await_count >= 1
+
+
+async def test_memory_flusher_runs_unlocked_without_lock_pool(tmp_path: Path) -> None:
+    """Backward-compat: no lock pool -> flusher still works (nullcontext)."""
+    flusher, cli = _make_flusher(
+        tmp_path,
+        compact_cfg=MemoryCompactionConfig(enabled=False),
+    )
+    key = SessionKey(chat_id=101)
+    session = _session_with_id("sess-abc")
+
+    flusher.mark_boundary(key)
+    await flusher.maybe_flush(key, session)
+
+    assert cli.execute.await_count == 1
