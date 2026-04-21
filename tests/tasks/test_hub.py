@@ -753,3 +753,114 @@ class TestPerAgentCLI:
         assert len(delivered) == 1
 
         await hub.shutdown()
+
+
+class TestTopicIdPlumbing:
+    """#74: TaskEntry.thread_id must flow into AgentRequest.topic_id so that
+    DUCTOR_TOPIC_ID is set in the task subprocess env. Without this, sub-tasks
+    created from within a running task lose the originating topic context and
+    route their results to the base/General topic."""
+
+    async def test_run_passes_topic_id_to_agent_request(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """AgentRequest.topic_id equals TaskEntry.thread_id when the latter is set."""
+        cli = _make_cli_service()
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock())
+
+        submit = TaskSubmit(
+            chat_id=42,
+            prompt="do stuff in a topic",
+            message_id=1,
+            thread_id=5150,
+            parent_agent="main",
+            name="Topic Task",
+        )
+        hub.submit(submit)
+        await asyncio.sleep(0.1)
+
+        # Capture the AgentRequest passed to cli.execute.
+        cli.execute.assert_called_once()
+        agent_request = cli.execute.call_args[0][0]
+        assert agent_request.topic_id == 5150
+        assert agent_request.chat_id == 42
+
+        await hub.shutdown()
+
+    async def test_run_passes_none_topic_id_when_thread_id_missing(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """Backward-compat: thread_id=None yields topic_id=None on AgentRequest."""
+        cli = _make_cli_service()
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock())
+
+        hub.submit(_submit())  # thread_id=None via helper
+        await asyncio.sleep(0.1)
+
+        cli.execute.assert_called_once()
+        agent_request = cli.execute.call_args[0][0]
+        assert agent_request.topic_id is None
+
+        await hub.shutdown()
+
+
+class TestPerAgentDeliveryIsolation:
+    """#73: TaskResult delivery must route through the parent_agent's registered
+    handler only -- sibling agents' handlers MUST NOT see results that weren't
+    addressed to them. Locks in the architectural per-agent routing so a future
+    refactor cannot silently regress it into delivering everything to main."""
+
+    async def test_result_isolation_between_agents(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """A task with parent_agent='sub1' invokes only sub1's handler."""
+        main_handler = AsyncMock()
+        sub1_handler = AsyncMock()
+        sub2_handler = AsyncMock()
+
+        sub_cli = _make_cli_service("sub1-output")
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=_make_cli_service("main-output"),
+            config=_make_config(),
+        )
+        hub.set_cli_service("sub1", sub_cli)
+        hub.set_result_handler("main", main_handler)
+        hub.set_result_handler("sub1", sub1_handler)
+        hub.set_result_handler("sub2", sub2_handler)
+
+        submit = TaskSubmit(
+            chat_id=55,
+            prompt="sub-agent task",
+            message_id=1,
+            thread_id=None,
+            parent_agent="sub1",
+            name="Sub1 Task",
+        )
+        hub.submit(submit)
+        await asyncio.sleep(0.1)
+
+        sub1_handler.assert_called_once()
+        main_handler.assert_not_called()
+        sub2_handler.assert_not_called()
+
+        delivered_result = sub1_handler.call_args[0][0]
+        assert delivered_result.parent_agent == "sub1"
+
+        await hub.shutdown()
