@@ -369,6 +369,7 @@ topic_reset = "Nieuwe sessie voor **{name}** ({provider})."
 
 [telegram]
 group_rejected = "Deze bot is niet geautoriseerd voor deze groep."
+channel_not_whitelisted = "Dit kanaal staat niet op de whitelist, ik vertrek."
 where_header = "**Waar**"
 where_no_tracker = "Chat-tracker niet beschikbaar."
 where_empty = "Nog geen chatactiviteit vastgelegd."

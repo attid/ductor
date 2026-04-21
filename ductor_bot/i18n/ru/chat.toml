@@ -369,6 +369,7 @@ topic_reset = "Новая сессия для **{name}** ({provider})."
 
 [telegram]
 group_rejected = "Этот бот не авторизован для этой группы."
+channel_not_whitelisted = "Этот канал не в списке разрешённых, я покидаю его."
 where_header = "**Где**"
 where_no_tracker = "Трекер чатов недоступен."
 where_empty = "Активности в чатах пока не зафиксировано."

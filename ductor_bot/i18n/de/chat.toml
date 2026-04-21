@@ -369,6 +369,7 @@ topic_reset = "Neue Session für **{name}** ({provider})."
 
 [telegram]
 group_rejected = "Dieser Bot ist für diese Gruppe nicht autorisiert."
+channel_not_whitelisted = "Dieser Kanal ist nicht freigeschaltet, ich verlasse ihn."
 where_header = "**Wo**"
 where_no_tracker = "Chat-Tracker nicht verfügbar."
 where_empty = "Noch keine Chat-Aktivität aufgezeichnet."

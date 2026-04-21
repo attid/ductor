@@ -368,6 +368,7 @@ topic_reset = "Sesi baru untuk **{name}** ({provider})."
 
 [telegram]
 group_rejected = "Bot ini tidak diizinkan untuk grup ini."
+channel_not_whitelisted = "Saluran ini tidak ada di whitelist, saya keluar."
 where_header = "**Lokasi**"
 where_no_tracker = "Pelacak obrolan tidak tersedia."
 where_empty = "Belum ada aktivitas obrolan yang tercatat."
