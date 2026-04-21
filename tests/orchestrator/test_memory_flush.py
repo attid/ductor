@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import pytest  # noqa: TC002  -- runtime fixture type (caplog)
+
 from ductor_bot.cli.types import AgentResponse
 from ductor_bot.config import MemoryCompactionConfig, MemoryFlushConfig
 from ductor_bot.orchestrator.memory_flush import MemoryFlusher
@@ -166,3 +168,39 @@ async def test_memory_flusher_skips_compaction_when_disabled(tmp_path: Path) -> 
 
     assert cli.execute.await_count == 1
     assert cli.execute.await_args[0][0].process_label == "memory_flush"
+
+
+async def test_memory_flusher_falls_back_on_bad_prompt_placeholder(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A user-configured compaction prompt with a typo falls back to the default.
+
+    Bug: ``.format()`` raises ``KeyError`` on unknown placeholders, which would
+    propagate up through ``maybe_flush`` and suppress the user's real reply.
+    """
+    bogus_cfg = MemoryCompactionConfig(
+        trigger_lines=70,
+        target_lines=40,
+        prompt="## COMPACT\nrewrite memory {memroy_typo} to {target_lines} lines.",
+    )
+    flusher, cli = _make_flusher(
+        tmp_path,
+        mainmemory_lines=80,
+        compact_cfg=bogus_cfg,
+    )
+    key = SessionKey(chat_id=101)
+    session = _session_with_id("sess-abc")
+
+    flusher.mark_boundary(key)
+    with caplog.at_level("WARNING", logger="ductor_bot.orchestrator.memory_flush"):
+        await flusher.maybe_flush(key, session)
+
+    # Turn proceeded: both flush + compaction fired.
+    assert cli.execute.await_count == 2
+    compact_call = cli.execute.await_args_list[1][0][0]
+    # Fallback was the default template, so "MEMORY COMPACTION" appears.
+    assert "MEMORY COMPACTION" in compact_call.prompt
+    assert "40" in compact_call.prompt
+    # Warning was logged.
+    assert any("invalid placeholder" in rec.message for rec in caplog.records)
