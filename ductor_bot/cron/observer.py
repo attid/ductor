@@ -32,6 +32,15 @@ logger = logging.getLogger(__name__)
 # Callback signature: (job_title, result_text, status, chat_id, topic_id, transport)
 CronResultCallback = Callable[[str, str, str, int, int | None, str], Awaitable[None]]
 
+_SILENT_SUCCESS_RESULTS = {"", "ok", "okay", "done", "success", "ок"}
+
+
+def should_deliver_result(status: str, result_text: str) -> bool:
+    """Return False for successful cron runs that explicitly request silence."""
+    if status != "success":
+        return True
+    return result_text.strip().casefold() not in _SILENT_SUCCESS_RESULTS
+
 
 @dataclass(slots=True)
 class _ScheduledJob:
@@ -408,13 +417,16 @@ class CronObserver(BaseTaskObserver):
         # cancels) running tasks.  Delivering first guarantees the
         # Telegram message is sent even if the task is cancelled during
         # the subsequent file I/O.
-        await self._deliver_result(
-            job_id,
-            job_title,
-            result.result_text,
-            result.status,
-            routing,
-        )
+        if should_deliver_result(result.status, result.result_text):
+            await self._deliver_result(
+                job_id,
+                job_title,
+                result.result_text,
+                result.status,
+                routing,
+            )
+        else:
+            logger.info("Cron job %s completed silently", job_title)
 
         self._manager.update_run_status(job_id, status=result.status)
         # Refresh our mtime baseline so the file-watcher doesn't treat the
