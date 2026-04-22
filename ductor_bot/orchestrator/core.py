@@ -51,7 +51,9 @@ from ductor_bot.orchestrator.hooks import (
     DELEGATION_REMINDER,
     MAINMEMORY_REMINDER,
     MessageHookRegistry,
+    build_memory_reflection_hook,
 )
+from ductor_bot.orchestrator.memory_flush import MemoryFlusher
 from ductor_bot.orchestrator.observers import ObserverManager
 from ductor_bot.orchestrator.providers import ProviderManager
 from ductor_bot.orchestrator.registry import CommandRegistry, OrchestratorResult
@@ -145,6 +147,8 @@ class Orchestrator:
                 gemini_cli_parameters=tuple(config.cli_parameters.gemini),
                 agent_name=agent_name,
                 interagent_port=interagent_port,
+                transcribe_command=config.transcription.audio_command,
+                video_transcribe_command=config.transcription.video_command,
             ),
             models=self._providers.models,
             available_providers=frozenset(),
@@ -174,10 +178,22 @@ class Orchestrator:
         )
         self._api_stop: Callable[[], Awaitable[None]] | None = None
         self._inflight_tracker = InflightTracker(paths.inflight_turns_path)
+        self._memory_flusher: MemoryFlusher | None = (
+            MemoryFlusher(
+                config.memory_flush,
+                self._cli_service,
+                config.memory_compaction,
+                paths,
+            )
+            if config.memory_flush.enabled
+            else None
+        )
         self._hook_registry = MessageHookRegistry()
         self._hook_registry.register(MAINMEMORY_REMINDER)
         self._hook_registry.register(DELEGATION_BRIEF)
         self._hook_registry.register(DELEGATION_REMINDER)
+        if config.memory_reflection.enabled:
+            self._hook_registry.register(build_memory_reflection_hook(config.memory_reflection))
         self._supervisor: AgentSupervisor | None = None  # Set by AgentSupervisor after creation
         self._task_hub: TaskHub | None = None  # Set by supervisor or __main__.py
         self._command_registry = CommandRegistry()
@@ -267,6 +283,10 @@ class Orchestrator:
         """Return cached Gemini API-key mode status."""
         return self._providers.gemini_api_key_mode
 
+    def refresh_gemini_api_key_mode(self) -> bool:
+        """Force a fresh read of Gemini auth settings (bypasses the cache)."""
+        return self._providers.refresh_gemini_api_key_mode()
+
     @property
     def active_provider_name(self) -> str:
         """Human-readable name for the active CLI provider."""
@@ -329,7 +349,15 @@ class Orchestrator:
 
         await self._ensure_docker()
 
-        directives = parse_directives(dispatch.text, self._providers._known_model_ids)
+        # _known_model_ids only covers Claude + Gemini IDs (refreshed on Gemini
+        # cache updates).  Codex model IDs live in a separate dynamic cache, so
+        # merge them in here before parsing so that directives like @gpt-5.4
+        # route to the Codex provider instead of falling through to the default.
+        known_ids = self._providers._known_model_ids
+        codex_cache = self._providers._codex_cache_fn() if self._providers._codex_cache_fn else None
+        if codex_cache is not None:
+            known_ids = known_ids | frozenset(m.id for m in codex_cache.models)
+        directives = parse_directives(dispatch.text, known_ids)
 
         # Check if a leading @directive matches a named session
         if directives.raw_directives:
@@ -414,20 +442,20 @@ class Orchestrator:
         logger.info("Session reset")
 
     async def reset_active_provider_session(self, key: SessionKey) -> str:
-        """Reset only the active provider session bucket for a given key."""
-        active = await self._sessions.get_active(key)
-        if active is not None:
-            provider = active.provider
-            model = active.model
-        else:
-            model, provider = self.resolve_runtime_target(self._config.model)
+        """Reset the active provider bucket to the config-default model.
 
+        ``/new`` acts as a "factory reset" -- the bucket cleared is the one
+        tied to ``config.model`` (resolved via provider mapping), not the
+        bucket the user last switched to via ``/model``. This matches the
+        behaviour users expect from a reset command (issue #82).
+        """
+        model, provider = self.resolve_runtime_target(self._config.model)
         await self._sessions.reset_provider_session(
             key,
             provider=provider,
             model=model,
         )
-        logger.info("Active provider session reset provider=%s", provider)
+        logger.info("Active provider session reset provider=%s model=%s", provider, model)
         return provider
 
     async def abort(self, chat_id: int) -> int:
@@ -464,6 +492,10 @@ class Orchestrator:
         """Wire all observer result callbacks to the message bus."""
         self._observers.wire_to_bus(bus, wake_handler=wake_handler)
         bus.set_injector(self)
+        # Share the bus lock pool with MemoryFlusher so silent flush / compact
+        # turns serialize against concurrent user turns on the same SessionKey.
+        if self._memory_flusher is not None:
+            self._memory_flusher.set_lock_pool(bus.lock_pool)
 
     async def handle_heartbeat(
         self,
@@ -635,6 +667,8 @@ class Orchestrator:
                     claude_cli_parameters=tuple(config.cli_parameters.claude),
                     codex_cli_parameters=tuple(config.cli_parameters.codex),
                     gemini_cli_parameters=tuple(config.cli_parameters.gemini),
+                    transcribe_command=config.transcription.audio_command,
+                    video_transcribe_command=config.transcription.video_command,
                 )
             )
 

@@ -42,10 +42,12 @@ class _StreamCallbacks:
         on_text: Callable[[str], Awaitable[None]] | None,
         on_tool: Callable[[str], Awaitable[None]] | None,
         on_status: Callable[[str | None], Awaitable[None]] | None,
+        on_compact_boundary: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._on_text = on_text
         self._on_tool = on_tool
         self._on_status = on_status
+        self._on_compact_boundary = on_compact_boundary
         self.init_session_id: str | None = None
 
     async def dispatch(self, event: StreamEvent) -> tuple[str, ResultEvent | None]:
@@ -64,16 +66,22 @@ class _StreamCallbacks:
         elif isinstance(event, SystemStatusEvent) and self._on_status is not None:
             await self._on_status(event.status)
         elif isinstance(event, CompactBoundaryEvent):
-            logger.info(
-                "Context compacted (trigger=%s, pre_tokens=%d)",
-                event.trigger,
-                event.pre_tokens,
-            )
-            if self._on_status is not None:
-                await self._on_status(None)
+            await self._handle_compact_boundary(event)
         elif isinstance(event, ResultEvent):
             return "", event
         return "", None
+
+    async def _handle_compact_boundary(self, event: CompactBoundaryEvent) -> None:
+        """Log the boundary and fan out to the configured callbacks."""
+        logger.info(
+            "Context compacted (trigger=%s, pre_tokens=%d)",
+            event.trigger,
+            event.pre_tokens,
+        )
+        if self._on_compact_boundary is not None:
+            await self._on_compact_boundary()
+        if self._on_status is not None:
+            await self._on_status(None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +102,9 @@ class CLIServiceConfig:
     gemini_cli_parameters: tuple[str, ...] = ()
     agent_name: str = "main"
     interagent_port: int = 8799
+    # External transcription hooks (#66) — empty strings keep built-in strategies.
+    transcribe_command: str = ""
+    video_transcribe_command: str = ""
 
     def cli_parameters_for_provider(self, provider: str) -> list[str]:
         """Return CLI parameters for the given provider."""
@@ -174,6 +185,7 @@ class CLIService:
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_activity: Callable[[str], Awaitable[None]] | None = None,
         on_system_status: Callable[[str | None], Awaitable[None]] | None = None,
+        on_compact_boundary: Callable[[], Awaitable[None]] | None = None,
     ) -> AgentResponse:
         """Execute a streaming CLI call with automatic fallback to non-streaming."""
         cli = self._make_cli(request)
@@ -187,7 +199,9 @@ class CLIService:
         result_event: ResultEvent | None = None
         stream_error = False
 
-        callbacks = _StreamCallbacks(on_text_delta, on_tool_activity, on_system_status)
+        callbacks = _StreamCallbacks(
+            on_text_delta, on_tool_activity, on_system_status, on_compact_boundary
+        )
 
         try:
             async for event in cli.send_streaming(
@@ -327,6 +341,8 @@ class CLIService:
                 cli_parameters=self._config.cli_parameters_for_provider(provider),
                 agent_name=self._config.agent_name,
                 interagent_port=self._config.interagent_port,
+                transcribe_command=self._config.transcribe_command,
+                video_transcribe_command=self._config.video_transcribe_command,
             )
         )
 
