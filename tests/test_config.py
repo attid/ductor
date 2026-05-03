@@ -34,8 +34,10 @@ def test_agent_config_defaults() -> None:
     assert cfg.cli_timeout == 1800.0
     assert cfg.permission_mode == "bypassPermissions"
     assert cfg.gemini_api_key is None
+    assert cfg.rule_sync_interval_seconds == 10.0
     assert cfg.telegram_token == ""
     assert cfg.allowed_user_ids == []
+    assert cfg.allowed_group_ids == []
 
 
 def test_agent_config_normalizes_nullish_gemini_api_key() -> None:

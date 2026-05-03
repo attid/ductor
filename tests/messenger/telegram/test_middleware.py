@@ -24,6 +24,7 @@ def _make_message(
     msg.chat.type = chat_type
     msg.from_user = MagicMock()
     msg.from_user.id = user_id
+    msg.from_user.is_bot = False
     msg.text = text
     msg.message_id = 1
     msg.is_topic_message = topic_thread_id is not None
@@ -243,6 +244,53 @@ class TestAuthMiddleware:
 
         await mw(handler, msg, {})
         assert calls == []
+
+    async def test_group_whitelist_blocks_unknown_group(self) -> None:
+        """Group not in allowed_group_ids is blocked even with group_mention_only."""
+        from ductor_bot.messenger.telegram.middleware import AuthMiddleware
+
+        mw = AuthMiddleware(
+            allowed_user_ids=set(),
+            group_mention_only=True,
+            allowed_group_ids={-100123},
+        )
+        handler = AsyncMock()
+        msg = _make_message(chat_id=-100999, user_id=555, chat_type="supergroup")
+
+        result = await mw(handler, msg, {})
+        handler.assert_not_called()
+        assert result is None
+
+    async def test_group_whitelist_passes_known_group(self) -> None:
+        """Whitelisted group passes with group_mention_only."""
+        from ductor_bot.messenger.telegram.middleware import AuthMiddleware
+
+        mw = AuthMiddleware(
+            allowed_user_ids=set(),
+            group_mention_only=True,
+            allowed_group_ids={-100123},
+        )
+        handler = AsyncMock(return_value="ok")
+        msg = _make_message(chat_id=-100123, user_id=555, chat_type="supergroup")
+
+        result = await mw(handler, msg, {})
+        handler.assert_called_once()
+        assert result == "ok"
+
+    async def test_empty_whitelists_block_all_groups(self) -> None:
+        """Empty allowed_group_ids means no groups are allowed (fail-closed)."""
+        from ductor_bot.messenger.telegram.middleware import AuthMiddleware
+
+        mw = AuthMiddleware(
+            allowed_user_ids=set(),
+            group_mention_only=True,
+        )
+        handler = AsyncMock(return_value="ok")
+        msg = _make_message(chat_id=-999, user_id=777, chat_type="group")
+
+        result = await mw(handler, msg, {})
+        handler.assert_not_called()
+        assert result is None
 
 
 class TestSequentialMiddleware:

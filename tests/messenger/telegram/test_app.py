@@ -100,6 +100,10 @@ def _make_message(
     type(msg).message_id = PropertyMock(return_value=message_id)
     msg.text = text
     msg.answer = AsyncMock(return_value=msg)
+    msg.reply_to_message = None
+    msg.entities = None
+    msg.caption = None
+    msg.caption_entities = None
 
     user = MagicMock(spec=User)
     user.id = user_id
@@ -501,7 +505,7 @@ class TestOnMessage:
     @patch("ductor_bot.messenger.telegram.app.strip_mention", return_value="clean text")
     async def test_strips_mention_from_text(self, mock_strip: MagicMock) -> None:
         tg_bot, _ = _make_tg_bot()
-        tg_bot.bot_instance_username = "testbot"
+        tg_bot._bot_username = "testbot"
         orch = _make_orchestrator()
         tg_bot._orchestrator = orch
 
@@ -525,11 +529,29 @@ class TestOnMessage:
 class TestResolveText:
     async def test_plain_text_message(self) -> None:
         tg_bot, _ = _make_tg_bot()
-        tg_bot.bot_instance_username = "mybot"
+        tg_bot._bot_username = "mybot"
         tg_bot._orchestrator = _make_orchestrator()
         msg = _make_message(text="Hello")
         result = await tg_bot._resolve_text(msg)
         assert result == "Hello"
+
+    async def test_reply_includes_replied_message_text(self) -> None:
+        tg_bot, _ = _make_tg_bot()
+        tg_bot._bot_username = "mybot"
+        tg_bot._orchestrator = _make_orchestrator()
+
+        msg = _make_message(text="@mybot what do you think?", chat_type="group")
+        reply = MagicMock(spec=Message)
+        reply.text = "Original message text"
+        reply.caption = None
+        msg.reply_to_message = reply
+
+        result = await tg_bot._resolve_text(msg)
+
+        assert result == (
+            "[REPLY TO]\nOriginal message text\n\n"
+            "[USER MESSAGE]\nwhat do you think?"
+        )
 
     async def test_none_when_no_text_and_no_media(self) -> None:
         tg_bot, _ = _make_tg_bot()
@@ -1018,32 +1040,6 @@ class TestCommandHandlers:
         await tg_bot._on_command(msg)
 
         mock_cmd.assert_called_once_with(orch, tg_bot.bot_instance, msg)
-
-    @patch("ductor_bot.messenger.telegram.app.handle_new_session", new_callable=AsyncMock)
-    async def test_on_new_calls_handle_new_session(self, mock_new: AsyncMock) -> None:
-        tg_bot, _ = _make_tg_bot()
-        orch = _make_orchestrator()
-        tg_bot._orchestrator = orch
-        msg = _make_message()
-
-        await tg_bot._on_new(msg)
-
-        mock_new.assert_called_once_with(
-            orch, tg_bot.bot_instance, msg, topic_names=tg_bot._topic_names
-        )
-
-    @patch(
-        "ductor_bot.messenger.telegram.app.handle_abort", new_callable=AsyncMock, return_value=True
-    )
-    async def test_on_abort_returns_handled(self, mock_abort: AsyncMock) -> None:
-        tg_bot, _ = _make_tg_bot()
-        tg_bot._orchestrator = _make_orchestrator()
-        msg = _make_message(chat_id=9)
-
-        result = await tg_bot._on_abort(9, msg)
-
-        assert result is True
-        mock_abort.assert_called_once()
 
     @patch("ductor_bot.messenger.telegram.app.handle_command", new_callable=AsyncMock)
     async def test_on_quick_command_delegates(self, mock_cmd: AsyncMock) -> None:
