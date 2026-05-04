@@ -35,23 +35,29 @@ class TestStreamEditor:
         assert call_kwargs["parse_mode"] == ParseMode.HTML
         assert "<b>world</b>" in call_kwargs["text"]
 
-    async def test_reply_to_first_message_only(self) -> None:
+    async def test_first_chunk_uses_reply_parameters_to_trigger(self) -> None:
+        """First chunk sends a true Telegram-reply on the trigger message
+        (via ``reply_parameters``) so other bots see it as addressed."""
         from ductor_bot.messenger.telegram.streaming import StreamEditor
 
         bot = MagicMock()
         reply_msg = MagicMock(spec=Message)
+        type(reply_msg).message_id = PropertyMock(return_value=42)
         sent_msg = MagicMock(spec=Message)
-        reply_msg.answer = AsyncMock(return_value=sent_msg)
         bot.send_message = AsyncMock(return_value=sent_msg)
 
         editor = StreamEditor(bot, chat_id=1, reply_to=reply_msg)
         await editor.append_text("First chunk")
-        reply_msg.answer.assert_called_once()
-
-        # Second chunk should NOT reply, but send as new message
-        await editor.append_text("Second chunk")
         assert bot.send_message.call_count == 1
-        assert reply_msg.answer.call_count == 1
+        first_call = bot.send_message.call_args.kwargs
+        assert first_call["reply_parameters"] is not None
+        assert first_call["reply_parameters"].message_id == 42
+
+        # Second chunk: no reply_parameters
+        await editor.append_text("Second chunk")
+        assert bot.send_message.call_count == 2
+        second_call = bot.send_message.call_args_list[1].kwargs
+        assert second_call["reply_parameters"] is None
 
     async def test_multiple_chunks_each_new_message(self) -> None:
         from ductor_bot.messenger.telegram.streaming import StreamEditor
@@ -179,7 +185,7 @@ class TestStreamEditorButtons:
         bot.edit_message_reply_markup = AsyncMock()
 
         reply_msg = MagicMock(spec=Message)
-        reply_msg.answer = AsyncMock(return_value=sent_msg)
+        type(reply_msg).message_id = PropertyMock(return_value=42)
 
         editor = StreamEditor(bot, chat_id=1, reply_to=reply_msg)
         await editor.append_text("Choose one")
@@ -242,8 +248,9 @@ class TestStreamEditorButtons:
         bot = MagicMock()
         sent_msg = MagicMock(spec=Message)
         type(sent_msg).message_id = PropertyMock(return_value=55)
+        bot.send_message = AsyncMock(return_value=sent_msg)
         reply_msg = MagicMock(spec=Message)
-        reply_msg.answer = AsyncMock(return_value=sent_msg)
+        type(reply_msg).message_id = PropertyMock(return_value=42)
         bot.edit_message_reply_markup = AsyncMock()
 
         editor = StreamEditor(bot, chat_id=1, reply_to=reply_msg)
@@ -275,16 +282,16 @@ class TestStreamEditorThreadId:
         assert bot.send_message.call_args.kwargs.get("message_thread_id") is None
 
     async def test_second_message_uses_thread_id(self) -> None:
-        """When reply_to is used, answer() auto-propagates.
-        The second message via send_message must use thread_id.
-        """
+        """First chunk uses reply_parameters; both must include thread_id."""
         bot = MagicMock()
         reply_msg = MagicMock(spec=Message)
+        type(reply_msg).message_id = PropertyMock(return_value=42)
         sent_msg = MagicMock(spec=Message)
-        reply_msg.answer = AsyncMock(return_value=sent_msg)
         bot.send_message = AsyncMock(return_value=sent_msg)
 
         editor = StreamEditor(bot, chat_id=1, reply_to=reply_msg, thread_id=77)
         await editor.append_text("First")
         await editor.append_text("Second")
-        assert bot.send_message.call_args.kwargs["message_thread_id"] == 77
+        assert bot.send_message.call_count == 2
+        for call in bot.send_message.call_args_list:
+            assert call.kwargs["message_thread_id"] == 77

@@ -248,6 +248,56 @@ class TestAuthMiddleware:
 class TestSequentialMiddleware:
     """Test dedup + per-chat sequential lock."""
 
+    async def test_conversation_guard_drops_bot_msg_after_limit(self) -> None:
+        from ductor_bot.messenger.telegram.conversation_guard import BotConversationGuard
+        from ductor_bot.messenger.telegram.middleware import SequentialMiddleware
+
+        guard = BotConversationGuard(max_hops=1, idle_reset_seconds=60.0)
+        mw = SequentialMiddleware(conversation_guard=guard)
+        handler = AsyncMock(return_value="ok")
+
+        bot_msg = _make_message(chat_id=10, text="bot text")
+        bot_msg.from_user.is_bot = True
+
+        # First bot msg passes (hop=1, within limit)
+        assert await mw(handler, bot_msg, {}) == "ok"
+        # Second bot msg dropped (hop=2 > 1)
+        assert await mw(handler, bot_msg, {}) is None
+        assert handler.call_count == 1
+
+    async def test_conversation_guard_resets_on_user_msg(self) -> None:
+        from ductor_bot.messenger.telegram.conversation_guard import BotConversationGuard
+        from ductor_bot.messenger.telegram.middleware import SequentialMiddleware
+
+        guard = BotConversationGuard(max_hops=1, idle_reset_seconds=60.0)
+        mw = SequentialMiddleware(conversation_guard=guard)
+        handler = AsyncMock(return_value="ok")
+
+        bot_msg = _make_message(chat_id=10, text="bot text")
+        bot_msg.from_user.is_bot = True
+        user_msg = _make_message(chat_id=10, text="user text")
+        user_msg.from_user.is_bot = False
+        user_msg.message_id = 2
+
+        await mw(handler, bot_msg, {})  # hop=1
+        assert await mw(handler, bot_msg, {}) is None  # hop=2 → drop
+        await mw(handler, user_msg, {})  # reset
+        # After reset, bot msg passes again
+        bot_msg.message_id = 3
+        assert await mw(handler, bot_msg, {}) == "ok"
+
+    async def test_conversation_guard_disabled_passes_all_bot_msgs(self) -> None:
+        from ductor_bot.messenger.telegram.middleware import SequentialMiddleware
+
+        mw = SequentialMiddleware(conversation_guard=None)
+        handler = AsyncMock(return_value="ok")
+        bot_msg = _make_message(chat_id=10, text="bot")
+        bot_msg.from_user.is_bot = True
+
+        for i in range(5):
+            bot_msg.message_id = i + 1
+            assert await mw(handler, bot_msg, {}) == "ok"
+
     async def test_unaddressed_group_message_dropped_before_queue(self) -> None:
         """In mention_only mode, an unaddressed group message must be dropped
         before the queue indicator is sent — otherwise users see a misleading
