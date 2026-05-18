@@ -430,6 +430,9 @@ class AgentConfig(BaseModel):
     language: str = "en"
     update_check: bool = True
     group_mention_only: bool = False
+    bot_conversation_enabled: bool = True
+    bot_conversation_max_hops: int = 3
+    bot_conversation_idle_reset_seconds: float = 60.0
     interagent_port: int = 8799
     transport: str = "telegram"  # "telegram" | "matrix"
     transports: list[str] = Field(default_factory=list)
