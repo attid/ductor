@@ -4,10 +4,8 @@
 
 | Branch | Type | Purpose | Upstream PR |
 |---|---|---|---|
-| `feat/telegram-reply-context` | feat | Прокидывает контекст реплая в промпт агенту | — |
+| `feat/telegram-reply-context` | feat | Прокидывает контекст реплая в промпт агенту | [#122](https://github.com/PleasePrompto/ductor/pull/122) |
 | `feat/bot-conversation-hop-guard` | feat | Бот→бот через TG-reply + hop-counter защита от петель | — |
-| `feat/gemini-auto-model` | feat | Кнопки `auto/pro/flash/flash-lite` в `/model` для Gemini | — |
-| `fix/telegram-queue-indicator-unaddressed` | fix | Не показывать "queue indicator" для неадресованных сообщений в группе | [#123](https://github.com/PleasePrompto/ductor/pull/123) |
 | `fix/cron-silent-success` | fix | Подавлять silent-success результаты cron | — |
 | `local/docker-and-ci` | local | Dockerfile, docker-compose, justfile, README.SERVER, GHCR workflow, uv.lock | n/a |
 | `local/docs-and-notes` | local | Локальные правки AGENTS.md/CLAUDE.md/GEMINI.md, PROJECT_MEMORY.md, docs/modules/bot.md | n/a |
@@ -20,16 +18,14 @@
 git fetch upstream
 git checkout main && git merge --ff-only upstream/main
 for b in feat/telegram-reply-context feat/bot-conversation-hop-guard \
-         feat/gemini-auto-model \
-         fix/telegram-queue-indicator-unaddressed fix/cron-silent-success \
+         fix/cron-silent-success \
          local/docker-and-ci local/docs-and-notes \
          local/config-and-bootstrap local/meta; do
     git checkout "$b" && git rebase main || break
 done
 git checkout deploy && git reset --hard main
 for b in feat/telegram-reply-context feat/bot-conversation-hop-guard \
-         feat/gemini-auto-model \
-         fix/telegram-queue-indicator-unaddressed fix/cron-silent-success \
+         fix/cron-silent-success \
          local/docker-and-ci local/docs-and-notes \
          local/config-and-bootstrap local/meta; do
     git merge --no-ff "$b" -m "deploy: include $b"
