@@ -616,6 +616,105 @@ class TestCronObserverExecution:
 class TestCronResultDelivery:
     """Result delivery must be robust: no silent drops, no race conditions."""
 
+    async def test_success_ok_result_is_not_delivered(self, tmp_path: Path) -> None:
+        """Successful local cron jobs can return OK to stay silent."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("daily", title="My Task"))
+        (paths.cron_tasks_dir / "daily").mkdir()
+
+        observer = _make_observer(paths, mgr)
+        callback = AsyncMock()
+        observer.set_result_handler(callback)
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "OK"}', b""))
+
+        with (
+            time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
+            patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            await observer._execute_job("daily", "Do work", "daily")
+
+        callback.assert_not_awaited()
+        job = mgr.get_job("daily")
+        assert job is not None
+        assert job.last_run_status == "success"
+
+    async def test_success_ru_ok_result_is_not_delivered(self, tmp_path: Path) -> None:
+        """Russian OK marker also keeps successful cron runs silent."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("daily", title="My Task"))
+        (paths.cron_tasks_dir / "daily").mkdir()
+
+        observer = _make_observer(paths, mgr)
+        callback = AsyncMock()
+        observer.set_result_handler(callback)
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "\xd0\xbe\xd0\xba"}', b""))
+
+        with (
+            time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
+            patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            await observer._execute_job("daily", "Do work", "daily")
+
+        callback.assert_not_awaited()
+
+    async def test_success_message_result_is_delivered(self, tmp_path: Path) -> None:
+        """Successful cron jobs still notify when they return user-facing text."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("daily", title="My Task"))
+        (paths.cron_tasks_dir / "daily").mkdir()
+
+        observer = _make_observer(paths, mgr)
+        callback = AsyncMock()
+        observer.set_result_handler(callback)
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "privet"}', b""))
+
+        with (
+            time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
+            patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            await observer._execute_job("daily", "Do work", "daily")
+
+        callback.assert_awaited_once_with("My Task", "privet", "success", 0, None, "tg")
+
+    async def test_error_result_is_delivered_even_when_text_is_ok(self, tmp_path: Path) -> None:
+        """Failure notifications are never suppressed by silent success markers."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("daily", title="My Task"))
+        (paths.cron_tasks_dir / "daily").mkdir()
+
+        observer = _make_observer(paths, mgr)
+        callback = AsyncMock()
+        observer.set_result_handler(callback)
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 1
+        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "OK"}', b""))
+
+        with (
+            time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
+            patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            await observer._execute_job("daily", "Do work", "daily")
+
+        callback.assert_awaited_once_with("My Task", "OK", "error:exit_1", 0, None, "tg")
+
     async def test_result_delivered_when_job_deleted_after_schedule(self, tmp_path: Path) -> None:
         """Result handler fires even if the job is removed before execution."""
         paths = _make_paths(tmp_path)
@@ -633,7 +732,7 @@ class TestCronResultDelivery:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = 0
-        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "Done"}', b""))
+        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "Report ready"}', b""))
 
         with (
             time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
@@ -646,7 +745,7 @@ class TestCronResultDelivery:
         callback.assert_awaited_once()
         title, result_text, status, chat_id, topic_id, transport = callback.call_args[0]
         assert title == "ephemeral"
-        assert result_text == "Done"
+        assert result_text == "Report ready"
         assert status == "success"
         assert chat_id == 0
         assert topic_id is None
@@ -676,7 +775,7 @@ class TestCronResultDelivery:
 
         mock_proc = AsyncMock()
         mock_proc.returncode = 0
-        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "ok"}', b""))
+        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "Report ready"}', b""))
 
         with (
             time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
