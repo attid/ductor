@@ -6,6 +6,7 @@
 |---|---|---|---|
 | `feat/telegram-reply-context` | feat | Прокидывает контекст реплая в промпт агенту | [#122](https://github.com/PleasePrompto/ductor/pull/122) |
 | `feat/bot-conversation-hop-guard` | feat | Бот→бот через TG-reply + hop-counter защита от петель | — |
+| `fix/config-reload-mtime-ns` | fix | Надежно детектить быстрые перезаписи `config.json` | — |
 | `fix/cron-silent-success` | fix | Подавлять silent-success результаты cron | — |
 | `local/docker-and-ci` | local | Dockerfile, docker-compose, justfile, README.SERVER, GHCR workflow, uv.lock | n/a |
 | `local/docs-and-notes` | local | Локальные правки AGENTS.md/CLAUDE.md/GEMINI.md, PROJECT_MEMORY.md, docs/modules/bot.md | n/a |
@@ -18,6 +19,7 @@
 git fetch upstream
 git checkout main && git merge --ff-only upstream/main
 for b in feat/telegram-reply-context feat/bot-conversation-hop-guard \
+         fix/config-reload-mtime-ns \
          fix/cron-silent-success \
          local/docker-and-ci local/docs-and-notes \
          local/config-and-bootstrap local/meta; do
@@ -25,6 +27,7 @@ for b in feat/telegram-reply-context feat/bot-conversation-hop-guard \
 done
 git checkout deploy && git reset --hard main
 for b in feat/telegram-reply-context feat/bot-conversation-hop-guard \
+         fix/config-reload-mtime-ns \
          fix/cron-silent-success \
          local/docker-and-ci local/docs-and-notes \
          local/config-and-bootstrap local/meta; do
