@@ -9,6 +9,7 @@
 | `fix/config-reload-mtime-ns` | fix | Надежно детектить быстрые перезаписи `config.json` | — |
 | `fix/cron-silent-success` | fix | Подавлять silent-success результаты cron | — |
 | `fix/codex-prompt-stdin` | fix | Передавать большие Codex prompts через stdin, а не argv | — |
+| `fix/task-retention-cleanup` | fix | Автоочистка завершенных background tasks по age/count retention | — |
 | `local/docker-and-ci` | local | Dockerfile, docker-compose, justfile, README.SERVER, GHCR workflow, uv.lock | n/a |
 | `local/docs-and-notes` | local | Локальные правки AGENTS.md/CLAUDE.md/GEMINI.md, PROJECT_MEMORY.md, docs/modules/bot.md | n/a |
 | `local/config-and-bootstrap` | local | __main__, config, install, orchestrator, telegram middleware/app overlays | n/a |
@@ -23,6 +24,7 @@ for b in feat/telegram-reply-context feat/bot-conversation-hop-guard \
          fix/config-reload-mtime-ns \
          fix/cron-silent-success \
          fix/codex-prompt-stdin \
+         fix/task-retention-cleanup \
          local/docker-and-ci local/docs-and-notes \
          local/config-and-bootstrap local/meta; do
     git checkout "$b" && git rebase main || break
@@ -32,6 +34,7 @@ for b in feat/telegram-reply-context feat/bot-conversation-hop-guard \
          fix/config-reload-mtime-ns \
          fix/cron-silent-success \
          fix/codex-prompt-stdin \
+         fix/task-retention-cleanup \
          local/docker-and-ci local/docs-and-notes \
          local/config-and-bootstrap local/meta; do
     git merge --no-ff "$b" -m "deploy: include $b"
