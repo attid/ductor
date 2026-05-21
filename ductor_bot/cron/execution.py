@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from shutil import which
 
+from ductor_bot.cli.base import env_flag_enabled
 from ductor_bot.cli.codex_events import parse_codex_jsonl
 from ductor_bot.cli.gemini_events import parse_gemini_json
 from ductor_bot.cli.gemini_utils import find_gemini_cli
@@ -19,6 +20,7 @@ from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
 from ductor_bot.infra.process_tree import force_kill_process_tree
 
 logger = logging.getLogger(__name__)
+_OMIT_CLAUDE_MODEL_ENV = "DUCTOR_CLAUDE_OMIT_MODEL"
 
 
 @dataclass(slots=True)
@@ -116,12 +118,12 @@ def _build_claude_cmd(exec_config: TaskExecutionConfig, prompt: str) -> OneShotC
         "-p",
         "--output-format",
         "json",
-        "--model",
-        exec_config.model,
         "--permission-mode",
         exec_config.permission_mode,
         "--no-session-persistence",
     ]
+    if not env_flag_enabled(_OMIT_CLAUDE_MODEL_ENV):
+        cmd[4:4] = ["--model", exec_config.model]
     # Add extra CLI parameters
     cmd.extend(exec_config.cli_parameters)
     cmd += ["--", prompt]
