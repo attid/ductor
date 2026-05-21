@@ -63,6 +63,12 @@ class TestResolveRuntimeTarget:
         assert model == "haiku"
         assert provider == "claude"
 
+    def test_custom_claude_model_when_config_provider_is_claude(self) -> None:
+        pm = _pm(model="claude-opus-4-7", provider="claude")
+        model, provider = pm.resolve_runtime_target()
+        assert model == "claude-opus-4-7"
+        assert provider == "claude"
+
 
 # ---------------------------------------------------------------------------
 # resolve_session_directive

@@ -136,7 +136,9 @@ class ProviderManager:
 
     def resolve_runtime_target(self, requested_model: str | None = None) -> tuple[str, str]:
         """Resolve requested model to the effective ``(model, provider)`` pair."""
-        model_name = requested_model or self._config.model
+        if requested_model is None:
+            return self._config.model, self._config.provider
+        model_name = requested_model
         return model_name, self._models.provider_for(model_name)
 
     def is_known_model(self, candidate: str) -> bool:

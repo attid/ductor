@@ -43,6 +43,21 @@ def test_make_cli_default_provider(tmp_path: Path) -> None:
     assert call_args.model == "opus"
 
 
+def test_make_cli_keeps_custom_claude_default_model(tmp_path: Path) -> None:
+    svc = _make_service(
+        tmp_path,
+        provider="claude",
+        default_model="claude-opus-4-7",
+    )
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        mock_create.return_value = MagicMock()
+        svc._make_cli(AgentRequest(prompt="test", chat_id=1))
+
+    call_args = mock_create.call_args[0][0]
+    assert call_args.provider == "claude"
+    assert call_args.model == "claude-opus-4-7"
+
+
 def test_make_cli_with_model_override(tmp_path: Path) -> None:
     svc = _make_service(tmp_path)
     with patch("ductor_bot.cli.service.create_cli") as mock_create:

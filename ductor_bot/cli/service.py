@@ -324,7 +324,11 @@ class CLIService:
         """Return ``(provider, model)`` that would be used for *request*."""
         if request.provider_override:
             return request.provider_override, request.model_override or ""
-        model = request.model_override or self._config.default_model
+        if request.model_override:
+            return self._models.provider_for(request.model_override), request.model_override
+        model = self._config.default_model
+        if self._config.provider == "claude":
+            return "claude", model
         return self._models.provider_for(model), model
 
     def _make_cli(self, request: AgentRequest) -> BaseCLI:
