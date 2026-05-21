@@ -166,6 +166,15 @@ class TestBuildCommand:
         idx = cmd.index("--model")
         assert cmd[idx + 1] == model
 
+    def test_omit_model_env_skips_model_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DUCTOR_CLAUDE_OMIT_MODEL", "1")
+        cli = _make_cli(monkeypatch, model="opus")
+
+        cmd = cli._build_command("hi")
+
+        assert "--model" not in cmd
+        assert "opus" not in cmd
+
     def test_prompt_is_always_last(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(
             monkeypatch,

@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import os
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
@@ -23,6 +24,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _IS_WINDOWS = sys.platform == "win32"
+
+
+def env_flag_enabled(name: str) -> bool:
+    """Return True when an environment flag is enabled."""
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _win_feed_stdin(process: asyncio.subprocess.Process, data: str) -> None:

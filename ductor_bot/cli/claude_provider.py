@@ -14,6 +14,7 @@ from ductor_bot.cli.base import (
     BaseCLI,
     CLIConfig,
     docker_wrap,
+    env_flag_enabled,
 )
 from ductor_bot.cli.executor import SubprocessSpec, run_oneshot_subprocess, run_streaming_subprocess
 from ductor_bot.cli.stream_events import (
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from ductor_bot.cli.timeout_controller import TimeoutController
 
 logger = logging.getLogger(__name__)
+_OMIT_MODEL_ENV = "DUCTOR_CLAUDE_OMIT_MODEL"
 
 
 class ClaudeCodeCLI(BaseCLI):
@@ -58,7 +60,8 @@ class ClaudeCodeCLI(BaseCLI):
         cmd = [self._cli, "-p", "--output-format", "json"]
 
         _add_opt(cmd, "--permission-mode", cfg.permission_mode)
-        _add_opt(cmd, "--model", cfg.model)
+        if not env_flag_enabled(_OMIT_MODEL_ENV):
+            _add_opt(cmd, "--model", cfg.model)
         _add_opt(cmd, "--system-prompt", cfg.system_prompt)
         _add_opt(cmd, "--append-system-prompt", cfg.append_system_prompt)
         _add_opt(cmd, "--max-turns", str(cfg.max_turns) if cfg.max_turns is not None else None)

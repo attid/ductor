@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 from ductor_bot.cli.param_resolver import TaskExecutionConfig
@@ -18,6 +19,9 @@ from ductor_bot.cron.execution import (
     parse_gemini_result,
     parse_result,
 )
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestBuildCmd:
@@ -40,6 +44,28 @@ class TestBuildCmd:
         assert result.stdin_input is None
         assert result.cmd[-1] == "hello"
         assert result.cmd[-2] == "--"
+
+    def test_claude_omit_model_env_skips_model_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DUCTOR_CLAUDE_OMIT_MODEL", "1")
+        exec_config = TaskExecutionConfig(
+            provider="claude",
+            model="opus",
+            reasoning_effort="",
+            cli_parameters=[],
+            permission_mode="bypassPermissions",
+            working_dir="/tmp",
+            file_access="all",
+        )
+
+        with patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"):
+            result = build_cmd(exec_config, "hello")
+
+        assert result is not None
+        assert "--model" not in result.cmd
+        assert "opus" not in result.cmd
+        assert result.cmd[-2:] == ["--", "hello"]
 
     def test_codex_provider(self) -> None:
         exec_config = TaskExecutionConfig(
