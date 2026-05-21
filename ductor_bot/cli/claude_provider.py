@@ -17,6 +17,7 @@ from ductor_bot.cli.base import (
     add_cli_opt,
     docker_prompt_tmp_dir,
     docker_wrap,
+    env_flag_enabled,
     format_cli_cmd,
     host_path_to_container,
 )
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from ductor_bot.cli.timeout_controller import TimeoutController
 
 logger = logging.getLogger(__name__)
+_OMIT_MODEL_ENV = "DUCTOR_CLAUDE_OMIT_MODEL"
 
 # Claude passes ``--append-system-prompt`` as a single argv token.  Linux caps
 # one argument at ``MAX_ARG_STRLEN`` (128 KiB); a larger value makes
@@ -73,7 +75,8 @@ class ClaudeCodeCLI(BaseCLI):
         cmd = [self._cli, "-p", "--output-format", "json"]
 
         add_cli_opt(cmd, "--permission-mode", cfg.permission_mode)
-        add_cli_opt(cmd, "--model", cfg.model)
+        if not env_flag_enabled(_OMIT_MODEL_ENV):
+            add_cli_opt(cmd, "--model", cfg.model)
         if cfg.reasoning_effort and cfg.reasoning_effort != "default":
             cmd += ["--effort", cfg.reasoning_effort]
         add_cli_opt(cmd, "--system-prompt", cfg.system_prompt)
