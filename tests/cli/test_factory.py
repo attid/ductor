@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from ductor_bot.cli.antigravity_provider import AntigravityCLI
 from ductor_bot.cli.base import CLIConfig
 from ductor_bot.cli.claude_provider import ClaudeCodeCLI
 from ductor_bot.cli.codex_provider import CodexCLI
@@ -28,6 +29,12 @@ def test_create_cli_returns_gemini() -> None:
     ):
         cli = create_cli(CLIConfig(provider="gemini"))
     assert isinstance(cli, GeminiCLI)
+
+
+def test_create_cli_returns_antigravity() -> None:
+    with patch("ductor_bot.cli.antigravity_provider.which", return_value="/usr/bin/agy"):
+        cli = create_cli(CLIConfig(provider="antigravity"))
+    assert isinstance(cli, AntigravityCLI)
 
 
 def test_create_cli_unknown_provider_returns_claude() -> None:

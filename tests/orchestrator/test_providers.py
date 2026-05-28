@@ -57,6 +57,12 @@ class TestResolveRuntimeTarget:
         assert model == "o3-mini"
         assert provider == "codex"
 
+    def test_antigravity_model(self) -> None:
+        pm = _pm()
+        model, provider = pm.resolve_runtime_target("antigravity")
+        assert model == "antigravity"
+        assert provider == "antigravity"
+
     def test_none_falls_back_to_config(self) -> None:
         pm = _pm(model="haiku")
         model, provider = pm.resolve_runtime_target(None)
@@ -89,6 +95,11 @@ class TestResolveSessionDirective:
         result = pm.resolve_session_directive("codex")
         assert result is not None
         assert result[0] == "codex"
+
+    def test_provider_name_antigravity(self) -> None:
+        pm = _pm()
+        result = pm.resolve_session_directive("antigravity")
+        assert result == ("antigravity", "antigravity")
 
     def test_known_model(self) -> None:
         pm = _pm()
@@ -175,6 +186,10 @@ class TestDefaultModelForProvider:
         pm = _pm()
         assert pm.default_model_for_provider("gemini") == ""
 
+    def test_antigravity(self) -> None:
+        pm = _pm()
+        assert pm.default_model_for_provider("antigravity") == "antigravity"
+
     def test_unknown_provider(self) -> None:
         pm = _pm()
         assert pm.default_model_for_provider("unknown") == ""
@@ -250,6 +265,10 @@ class TestActiveProviderName:
     def test_codex(self) -> None:
         pm = _pm(model="o3-mini", provider="codex")
         assert pm.active_provider_name == "Codex"
+
+    def test_antigravity(self) -> None:
+        pm = _pm(model="antigravity", provider="antigravity")
+        assert pm.active_provider_name == "Antigravity"
 
 
 # ---------------------------------------------------------------------------

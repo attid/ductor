@@ -195,6 +195,9 @@ async def model_selector_start(
         codex_cache = (
             orch._observers.codex_cache_obs.get_cache() if orch._observers.codex_cache_obs else None
         )
+        if provider == "antigravity":
+            result = await switch_model(orch, key, orch.default_model_for_provider(provider))
+            return SelectorResponse(text=result)
         return await _build_model_step(provider, header, codex_cache)
 
     buttons: list[Button] = []
@@ -204,6 +207,8 @@ async def model_selector_start(
         buttons.append(Button(text="CODEX", callback_data="ms:p:codex"))
     if "gemini" in authed:
         buttons.append(Button(text="GEMINI", callback_data="ms:p:gemini"))
+    if "antigravity" in authed:
+        buttons.append(Button(text="ANTIGRAVITY", callback_data="ms:p:antigravity"))
 
     keyboard = ButtonGrid(rows=[buttons])
     return SelectorResponse(text=f"{header}\n\n{t('model.pick_provider')}", buttons=keyboard)
@@ -229,7 +234,7 @@ async def handle_model_callback(
     )
 
     if action == "p":
-        return await _build_model_step(payload, await _status_line(orch, key), codex_cache)
+        return await _handle_provider_selected(orch, key, payload, codex_cache)
 
     if action == "m":
         return await _handle_model_selected(orch, key, payload, codex_cache)
@@ -423,6 +428,19 @@ async def _build_model_step(
     return SelectorResponse(text=f"{header}\n\n{t('model.select_codex')}", buttons=keyboard)
 
 
+async def _handle_provider_selected(
+    orch: Orchestrator,
+    key: SessionKey,
+    provider: str,
+    codex_cache: CodexModelCache | None = None,
+) -> SelectorResponse:
+    """Handle provider selection before model-specific steps."""
+    if provider == "antigravity":
+        result = await switch_model(orch, key, orch.default_model_for_provider(provider))
+        return SelectorResponse(text=result)
+    return await _build_model_step(provider, await _status_line(orch, key), codex_cache)
+
+
 async def _handle_model_selected(
     orch: Orchestrator,
     key: SessionKey,
@@ -432,7 +450,7 @@ async def _handle_model_selected(
     """Handle a model button press. Claude/Gemini: switch immediately. Codex: show reasoning."""
     provider = orch.models.provider_for(model_id)
 
-    if provider in ("claude", "gemini"):
+    if provider in ("claude", "gemini", "antigravity"):
         result = await switch_model(orch, key, model_id)
         return SelectorResponse(text=result)
 

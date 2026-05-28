@@ -26,9 +26,11 @@ from ductor_bot.session.key import SessionKey
 _AUTHED_CLAUDE = AuthResult("claude", AuthStatus.AUTHENTICATED)
 _AUTHED_CODEX = AuthResult("codex", AuthStatus.AUTHENTICATED)
 _AUTHED_GEMINI = AuthResult("gemini", AuthStatus.AUTHENTICATED)
+_AUTHED_ANTIGRAVITY = AuthResult("antigravity", AuthStatus.AUTHENTICATED)
 _NOT_FOUND_CLAUDE = AuthResult("claude", AuthStatus.NOT_FOUND)
 _NOT_FOUND_CODEX = AuthResult("codex", AuthStatus.NOT_FOUND)
 _NOT_FOUND_GEMINI = AuthResult("gemini", AuthStatus.NOT_FOUND)
+_NOT_FOUND_ANTIGRAVITY = AuthResult("antigravity", AuthStatus.NOT_FOUND)
 
 _CODEX_MODELS = [
     CodexModelInfo(
@@ -96,7 +98,12 @@ def test_prefix_detection() -> None:
 
 async def test_start_no_providers(orch: Orchestrator) -> None:
     with _patch_auth(
-        {"claude": _NOT_FOUND_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
+        {
+            "claude": _NOT_FOUND_CLAUDE,
+            "codex": _NOT_FOUND_CODEX,
+            "gemini": _NOT_FOUND_GEMINI,
+            "antigravity": _NOT_FOUND_ANTIGRAVITY,
+        }
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "No authenticated providers" in resp.text
@@ -159,7 +166,12 @@ async def test_start_shows_configured_model_without_runtime_fallback(orch: Orche
 
 async def test_start_two_providers(orch: Orchestrator) -> None:
     with _patch_auth(
-        {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
+        {
+            "claude": _AUTHED_CLAUDE,
+            "codex": _AUTHED_CODEX,
+            "gemini": _NOT_FOUND_GEMINI,
+            "antigravity": _AUTHED_ANTIGRAVITY,
+        }
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Model Selector" in resp.text
@@ -167,6 +179,24 @@ async def test_start_two_providers(orch: Orchestrator) -> None:
     labels = [btn.text for row in resp.buttons.rows for btn in row]
     assert "CLAUDE" in labels
     assert "CODEX" in labels
+    assert "ANTIGRAVITY" in labels
+
+
+async def test_start_one_provider_antigravity_switches_directly(orch: Orchestrator) -> None:
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    with _patch_auth(
+        {
+            "claude": _NOT_FOUND_CLAUDE,
+            "codex": _NOT_FOUND_CODEX,
+            "gemini": _NOT_FOUND_GEMINI,
+            "antigravity": _AUTHED_ANTIGRAVITY,
+        }
+    ):
+        resp = await model_selector_start(orch, SessionKey(chat_id=1))
+    assert "antigravity" in resp.text
+    assert resp.buttons is None
+    assert orch._config.provider == "antigravity"
+    assert orch._config.model == "antigravity"
 
 
 async def test_start_one_provider_gemini_uses_discovered_models(orch: Orchestrator) -> None:
@@ -233,6 +263,14 @@ async def test_callback_provider_codex_fallback(orch: Orchestrator) -> None:
     assert resp.buttons is not None
     labels = [btn.text for row in resp.buttons.rows for btn in row]
     assert any("o3" in label.lower() for label in labels) or "<< Back" in labels
+
+
+async def test_callback_provider_antigravity_switches_directly(orch: Orchestrator) -> None:
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    resp = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:p:antigravity")
+    assert "antigravity" in resp.text
+    assert resp.buttons is None
+    assert orch._config.provider == "antigravity"
 
 
 # -- handle_model_callback: model selection --

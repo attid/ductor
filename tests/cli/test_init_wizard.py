@@ -166,6 +166,10 @@ def test_check_clis_aborts_when_all_fail_or_unauthenticated() -> None:
             "ductor_bot.cli.init_wizard.check_gemini_auth",
             return_value=AuthResult("gemini", AuthStatus.NOT_FOUND),
         ),
+        patch(
+            "ductor_bot.cli.init_wizard.check_antigravity_auth",
+            return_value=AuthResult("antigravity", AuthStatus.NOT_FOUND),
+        ),
         pytest.raises(SystemExit),
     ):
         _check_clis(console)

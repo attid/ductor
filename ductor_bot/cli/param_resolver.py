@@ -33,6 +33,30 @@ def _validate_gemini_model(model: str) -> None:
         raise DuctorError(msg)
 
 
+def _validate_model_for_provider(
+    provider: str,
+    model: str,
+    codex_cache: CodexModelCache | None,
+) -> str:
+    """Validate provider/model pair and return the effective model."""
+    if provider == "claude":
+        if model not in CLAUDE_MODELS:
+            msg = f"Invalid Claude model: {model}. Must be one of {sorted(CLAUDE_MODELS)}"
+            raise DuctorError(msg)
+    elif provider == "gemini":
+        _validate_gemini_model(model)
+    elif provider == "antigravity":
+        return "antigravity"
+    else:  # codex
+        if codex_cache is None:
+            msg = "Codex cache is required for Codex model validation"
+            raise DuctorError(msg)
+        if not codex_cache.validate_model(model):
+            msg = f"Invalid Codex model: {model}"
+            raise DuctorError(msg)
+    return model
+
+
 @dataclass(frozen=True)
 class TaskOverrides:
     """Per-task configuration overrides from CronJob or WebhookEntry."""
@@ -92,19 +116,7 @@ def resolve_cli_config(
     model = overrides.model or base_config.model
 
     # 3. Validate model
-    if provider == "claude":
-        if model not in CLAUDE_MODELS:
-            msg = f"Invalid Claude model: {model}. Must be one of {sorted(CLAUDE_MODELS)}"
-            raise DuctorError(msg)
-    elif provider == "gemini":
-        _validate_gemini_model(model)
-    else:  # codex
-        if codex_cache is None:
-            msg = "Codex cache is required for Codex model validation"
-            raise DuctorError(msg)
-        if not codex_cache.validate_model(model):
-            msg = f"Invalid Codex model: {model}"
-            raise DuctorError(msg)
+    model = _validate_model_for_provider(provider, model, codex_cache)
 
     # 4. Resolve reasoning effort (Codex only)
     reasoning_effort = ""

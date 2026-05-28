@@ -13,6 +13,7 @@ def test_cli_parameters_config_defaults() -> None:
     config = CLIParametersConfig()
     assert config.claude == []
     assert config.codex == []
+    assert config.antigravity == []
 
 
 def test_cli_parameters_config_with_values() -> None:
@@ -20,9 +21,11 @@ def test_cli_parameters_config_with_values() -> None:
     config = CLIParametersConfig(
         claude=["--fast", "--no-cache"],
         codex=["--verbose", "--debug"],
+        antigravity=["--sandbox"],
     )
     assert config.claude == ["--fast", "--no-cache"]
     assert config.codex == ["--verbose", "--debug"]
+    assert config.antigravity == ["--sandbox"]
 
 
 def test_agent_config_includes_cli_parameters() -> None:

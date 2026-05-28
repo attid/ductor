@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum, unique
 from pathlib import Path
+from shutil import which
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.gemini_utils import find_gemini_cli
@@ -202,6 +203,34 @@ def check_gemini_auth() -> AuthResult:
     result = AuthResult("gemini", AuthStatus.INSTALLED)
     logger.debug("Auth check provider=%s status=%s", result.provider, result.status)
     return result
+
+
+def check_antigravity_auth() -> AuthResult:
+    """Check Antigravity CLI auth via API key, Gemini OAuth cache, or install marker."""
+    if which("agy") is None:
+        result = AuthResult("antigravity", AuthStatus.NOT_FOUND)
+        logger.debug("Auth check provider=%s status=%s", result.provider, result.status)
+        return result
+
+    if _has_nonempty_env("ANTIGRAVITY_API_KEY"):
+        result = AuthResult("antigravity", AuthStatus.AUTHENTICATED)
+        logger.debug("Auth check provider=%s status=%s (env key)", result.provider, result.status)
+        return result
+
+    if _antigravity_cli_authenticated():
+        result = AuthResult("antigravity", AuthStatus.AUTHENTICATED)
+        logger.debug("Auth check provider=%s status=%s (oauth cache)", result.provider, result.status)
+        return result
+
+    result = AuthResult("antigravity", AuthStatus.INSTALLED)
+    logger.debug("Auth check provider=%s status=%s", result.provider, result.status)
+    return result
+
+
+def _antigravity_cli_authenticated() -> bool:
+    """Return True when Antigravity has a usable local OAuth cache marker."""
+    oauth_file = Path.home() / ".gemini" / "oauth_creds.json"
+    return _is_nonempty_file(oauth_file)
 
 
 def _gemini_home_dir() -> Path:
@@ -406,6 +435,7 @@ _CHECKERS: dict[str, Callable[[], AuthResult]] = {
     "claude": check_claude_auth,
     "codex": check_codex_auth,
     "gemini": check_gemini_auth,
+    "antigravity": check_antigravity_auth,
 }
 
 

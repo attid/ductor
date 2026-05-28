@@ -229,6 +229,7 @@ class CLIParametersConfig(BaseModel):
     claude: list[str] = Field(default_factory=list)
     codex: list[str] = Field(default_factory=list)
     gemini: list[str] = Field(default_factory=list)
+    antigravity: list[str] = Field(default_factory=list)
 
 
 class MatrixConfig(BaseModel):
@@ -593,6 +594,8 @@ class ModelRegistry:
             or model_id.startswith(("gemini-", "auto-gemini-"))
         ):
             return "gemini"
+        if model_id == "antigravity":
+            return "antigravity"
         return "codex"
 
 

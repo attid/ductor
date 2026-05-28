@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from ductor_bot.cli.auth import (
     AuthResult,
     AuthStatus,
+    check_antigravity_auth,
     check_claude_auth,
     check_codex_auth,
     check_gemini_auth,
@@ -246,6 +247,39 @@ def test_check_codex_auth_handles_home_runtime_error(
 
     assert result.provider == "codex"
     assert result.status == AuthStatus.NOT_FOUND
+
+
+# -- Antigravity auth --
+
+
+def test_check_antigravity_auth_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ductor_bot.cli.auth.which", lambda _: None)
+    monkeypatch.delenv("ANTIGRAVITY_API_KEY", raising=False)
+
+    result = check_antigravity_auth()
+
+    assert result.provider == "antigravity"
+    assert result.status == AuthStatus.NOT_FOUND
+
+
+def test_check_antigravity_auth_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ductor_bot.cli.auth.which", lambda _: "/usr/bin/agy")
+    monkeypatch.delenv("ANTIGRAVITY_API_KEY", raising=False)
+    monkeypatch.setattr("ductor_bot.cli.auth._antigravity_cli_authenticated", lambda: False)
+
+    result = check_antigravity_auth()
+
+    assert result.provider == "antigravity"
+    assert result.status == AuthStatus.INSTALLED
+
+
+def test_check_antigravity_auth_env_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ductor_bot.cli.auth.which", lambda _: "/usr/bin/agy")
+    monkeypatch.setenv("ANTIGRAVITY_API_KEY", "test-key")
+
+    result = check_antigravity_auth()
+
+    assert result.status == AuthStatus.AUTHENTICATED
 
 
 # -- Gemini auth --
