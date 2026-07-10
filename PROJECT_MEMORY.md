@@ -19,7 +19,8 @@ Last updated: 2026-07-10
 - `fix/claude-omit-model-env`: `DUCTOR_CLAUDE_OMIT_MODEL` support.
 - `local/config-and-bootstrap`: runtime env overrides and permissive group auth when
   `group_mention_only=true`.
-- `local/docker-and-ci`: application image, compose files, and GHCR build workflow.
+- `local/docker-and-ci`: application image, provider CLIs, persistent Antigravity keyring,
+  compose files, and GHCR build workflow.
 - `local/docs-and-notes`: local rule additions and this memory file.
 - `local/meta`: overlay registry and rebuild instructions.
 
@@ -31,8 +32,11 @@ Last updated: 2026-07-10
 
 ## Docker Notes
 
-- The application image installs ductor plus current npm releases of Codex, Claude Code,
-  and Gemini CLI at build time.
+- The application image installs ductor, current npm releases of Codex, Claude Code and
+  Gemini CLI, plus the official Antigravity CLI (`agy`) at build time.
+- The container entrypoint starts D-Bus and GNOME Keyring. Antigravity OAuth survives
+  recreation through the `antigravity_keyring` volume; `~/.gemini` remains its settings
+  and conversation-state volume.
 - Runtime uses the `node` user, `/opt/venv`, and `/home/node` paths.
 - Compose files use named volumes for ductor state, provider auth, and project data.
 - GHCR workflow builds `ghcr.io/attid/ductor:latest` on pushes to `deploy` and supports
