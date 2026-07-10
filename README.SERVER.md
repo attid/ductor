@@ -8,66 +8,78 @@
 cd /path/to/ductor
 docker pull ghcr.io/attid/ductor:latest
 
-mkdir -p .ductor projects
-mkdir -p "$HOME/.codex" "$HOME/.claude"
 ```
 
 ## 2. Первичная настройка (onboarding)
 
 ```bash
-docker run --rm -it \
-  -e DUCTOR_HOME=/home/node/.ductor \
-  -e CODEX_HOME=/home/node/.codex \
-  -e TZ=UTC \
-  -v "$(pwd)/.ductor:/home/node/.ductor" \
-  -v "$HOME/.codex:/home/node/.codex" \
-  -v "$HOME/.claude:/home/node/.claude" \
-  -v "$(pwd)/projects:/home/node/.ductor/workspace/projects" \
-  ghcr.io/attid/ductor:latest \
-  ductor onboarding
+docker compose run --rm ductor ductor onboarding
 ```
 
-Onboarding создаст и заполнит `./.ductor/config/config.json`.
+Onboarding создаст и заполнит конфигурацию в volume `ductor_data`.
 
-## 3. Запуск через Compose
+## 3. Авторизация Antigravity
 
-В репозитории уже есть готовый `docker-compose.yml` (на image `ghcr.io/montelibero/ductor:latest`).
+Образ уже содержит `agy`, D-Bus и постоянный keyring. Для первого входа запусти:
+
+```bash
+docker compose run --rm ductor agy
+```
+
+Открой напечатанную OAuth-ссылку, заверши вход и вставь полученный код в терминал.
+После входа закрой TUI через `Ctrl+D`. Авторизация сохранится в volume
+`antigravity_keyring`, а настройки и история — в `gemini_auth`.
+
+По умолчанию пароль keyring генерируется автоматически и хранится внутри его volume.
+Чтобы задать стабильный пароль самостоятельно, добавь переменную до первого входа:
+
+```yaml
+environment:
+  DUCTOR_KEYRING_PASSWORD: change_me
+```
+
+## 4. Запуск через Compose
+
+В репозитории уже есть готовый `docker-compose.yml` на image
+`ghcr.io/attid/ductor:latest`.
 
 ```bash
 docker compose up -d
 docker compose logs -f
 ```
 
-## 4. Обновление
+## 5. Обновление
 
 ```bash
-docker pull ghcr.io/montelibero/ductor:latest
+docker pull ghcr.io/attid/ductor:latest
 docker compose up -d
 ```
 
-## 5. Остановка
+## 6. Остановка
 
 ```bash
 docker compose down
 ```
 
-## 6. Что сохраняется (volumes)
+## 7. Что сохраняется (volumes)
 
-- `./.ductor` — конфиг, сессии, cron/webhooks, память, логи
-- `$HOME/.codex` — авторизация Codex CLI
-- `$HOME/.claude` — авторизация Claude CLI
-- `./projects` — рабочие проекты агента (доступны в `~/.ductor/workspace/projects`)
+- `ductor_data` — конфиг, сессии, cron/webhooks, память и логи
+- `codex_auth` — авторизация Codex CLI
+- `claude_auth` — авторизация Claude CLI
+- `gemini_auth` — авторизация Gemini, настройки и история Antigravity
+- `antigravity_keyring` — OAuth-токены Antigravity и пароль локального keyring
+- `ductor_projects` — рабочие проекты агента
 
-## 7. Частая проблема: Permission denied на `.ductor/config`
+## 8. Сброс авторизации Antigravity
 
-Если видишь ошибку записи в `/home/node/.ductor/...`:
+Удаление keyring требует повторного OAuth-входа:
 
 ```bash
-sudo chown -R "$(id -u):$(id -g)" .ductor
-chmod -R u+rwX .ductor
+docker compose down
+docker volume rm ductor_antigravity_keyring
 ```
 
-## 8. Webhook (опционально)
+## 9. Webhook (опционально)
 
 Для минимального запуска webhook не нужен.  
 Если понадобится — открой `ports` в `docker-compose.yml` и включи `webhooks` в `config.json`.

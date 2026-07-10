@@ -14,6 +14,7 @@ services:
     volumes:
       - ductor_data:/home/node/.ductor
       - gemini_auth:/home/node/.gemini
+      - antigravity_keyring:/home/node/.local/share/keyrings
       - codex_auth:/home/node/.codex
       - claude_auth:/home/node/.claude
       - ductor_projects:/home/node/.ductor/workspace/projects
@@ -23,6 +24,7 @@ services:
 volumes:
   ductor_data:
   gemini_auth:
+  antigravity_keyring:
   codex_auth:
   claude_auth:
   ductor_projects:

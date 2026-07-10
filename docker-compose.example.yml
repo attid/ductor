@@ -14,6 +14,7 @@ services:
       - codex_auth:/home/node/.codex
       - claude_auth:/home/node/.claude
       - gemini_auth:/home/node/.gemini
+      - antigravity_keyring:/home/node/.local/share/keyrings
       - ductor_projects:/home/node/.ductor/workspace/projects
 
       # Optional: if you want ductor's internal docker sandbox mode inside this container
@@ -28,4 +29,5 @@ volumes:
   codex_auth:
   claude_auth:
   gemini_auth:
+  antigravity_keyring:
   ductor_projects:
