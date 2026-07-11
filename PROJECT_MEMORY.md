@@ -14,6 +14,8 @@ Last updated: 2026-07-10
 
 - `feat/bot-conversation-hop-guard`: true Telegram replies plus bot-to-bot hop limiting.
 - `fix/config-reload-mtime-ns`: digest-based config reload detection.
+- `fix/gemini-custom-model-validation`: treat discovered Gemini models as UI hints rather
+  than an allowlist for `gemini-*` task models; log cron config errors without tracebacks.
 - `fix/codex-prompt-stdin`: pass large Codex prompts through stdin.
 - `fix/task-retention-cleanup`: automatic age/count retention for finished tasks.
 - `fix/claude-omit-model-env`: `DUCTOR_CLAUDE_OMIT_MODEL` support.
