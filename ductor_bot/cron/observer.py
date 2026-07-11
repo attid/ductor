@@ -19,6 +19,7 @@ from cronsim import CronSim, CronSimError
 from ductor_bot.cli.param_resolver import TaskOverrides
 from ductor_bot.config import resolve_user_timezone
 from ductor_bot.cron.manager import CronManager
+from ductor_bot.errors import DuctorError
 from ductor_bot.infra.base_task_observer import BaseTaskObserver
 from ductor_bot.infra.file_watcher import FileWatcher
 from ductor_bot.infra.task_runner import execute_in_task_folder
@@ -291,6 +292,8 @@ class CronObserver(BaseTaskObserver):
         except asyncio.CancelledError:
             logger.warning("Cron job %s cancelled during execution", scheduled_job.id)
             return
+        except DuctorError as exc:
+            logger.log(logging.ERROR, "Cron job %s configuration error: %s", scheduled_job.id, exc)
         except Exception:
             logger.exception("Cron job %s failed unexpectedly", scheduled_job.id)
         if self._running:
