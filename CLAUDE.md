@@ -15,6 +15,10 @@ Stack:
 - Pydantic 2.x
 - asyncio
 
+## Session Memory
+
+At the start of each session, read `PROJECT_MEMORY.md` and use it as the short-term project history/context.
+
 ## Development Commands
 
 ```bash
