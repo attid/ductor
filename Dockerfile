@@ -49,7 +49,7 @@ COPY ductor_bot ./ductor_bot
 
 # Create venv and install project with dependencies
 RUN uv venv "${VIRTUAL_ENV}" --python python3 \
-    && uv pip install --python "${VIRTUAL_ENV}/bin/python" .
+    && uv pip install --python "${VIRTUAL_ENV}/bin/python" ".[api]"
 
 # Install CLI providers
 RUN npm install -g @openai/codex @anthropic-ai/claude-code @google/gemini-cli
