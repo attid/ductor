@@ -1,14 +1,14 @@
 # Project Memory
 
-Last updated: 2026-07-10
+Last updated: 2026-07-28
 
 ## Current State
 
-- `main` and `fork/main` mirror `upstream/main` at `626d90b` (post-v0.18.2, package 0.18.3).
-- Upstream now includes Antigravity, Telegram reply context, Gemini model discovery,
-  queue filtering, and explicit cron `silent_on_success` support.
+- `main` mirrors `upstream/main` at `3e3c88a` (v0.20.1).
+- Upstream now includes Slack, Grok, project roots, session/cron improvements, Codex prompt
+  stdin handling, and finished-task retention in addition to earlier integrations.
 - Personal behavior is maintained as small overlay branches and assembled into `deploy`.
-- Pre-update branch tips are preserved under `refs/backups/20260710-pre-v018/`.
+- Pre-update branch tips are preserved under `refs/backups/20260728-pre-v0201/`.
 
 ## Active Overlay
 
@@ -16,8 +16,6 @@ Last updated: 2026-07-10
 - `fix/config-reload-mtime-ns`: digest-based config reload detection.
 - `fix/gemini-custom-model-validation`: treat discovered Gemini models as UI hints rather
   than an allowlist for `gemini-*` task models; log cron config errors without tracebacks.
-- `fix/codex-prompt-stdin`: pass large Codex prompts through stdin.
-- `fix/task-retention-cleanup`: automatic age/count retention for finished tasks.
 - `fix/claude-omit-model-env`: `DUCTOR_CLAUDE_OMIT_MODEL` support.
 - `local/config-and-bootstrap`: runtime env overrides and permissive group auth when
   `group_mention_only=true`.
@@ -29,13 +27,16 @@ Last updated: 2026-07-10
 ## Retired Overlay
 
 - Antigravity provider, Telegram reply context, Gemini auto-model/discovery, queue filtering,
-  and cron silent-success code patches are no longer merged because upstream supersedes them.
+  Codex prompt stdin, task retention, and cron silent-success code patches are no longer
+  merged because upstream supersedes them.
 - Cron jobs that should stay quiet must use upstream `silent_on_success=true`.
 
 ## Docker Notes
 
 - The application image installs ductor, current npm releases of Codex, Claude Code and
   Gemini CLI, plus the official Antigravity CLI (`agy`) at build time.
+- Ductor is installed with the `api` extra, including PyNaCl, so the optional encrypted
+  WebSocket API can run in the application container.
 - The container entrypoint starts D-Bus and GNOME Keyring. Antigravity OAuth survives
   recreation through the `antigravity_keyring` volume; `~/.gemini` remains its settings
   and conversation-state volume.
