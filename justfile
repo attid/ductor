@@ -1,3 +1,5 @@
+IMAGE_NAME := "ductor"
+
 # Development task runner for ductor
 # Requires: just 1.42.0+ (https://github.com/casey/just)
 
@@ -21,6 +23,9 @@ test *args:
 # Run the test suite in parallel via pytest-xdist (opt-in; not verified parallel-safe across all 2246+ tests)
 test-parallel *args:
     uv run pytest -n auto {{args}}
+
+build tag="latest":
+    docker build -t {{IMAGE_NAME}}:{{tag}} .
 
 [private]
 _lint:
