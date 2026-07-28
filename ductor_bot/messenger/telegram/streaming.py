@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import ReplyParameters
 
 from ductor_bot.messenger.telegram.buttons import extract_buttons
 from ductor_bot.messenger.telegram.formatting import (
@@ -119,21 +120,26 @@ class StreamEditor:
         raw_fallback: str = "",
         parse_mode: ParseMode | None = ParseMode.HTML,
     ) -> None:
-        """Send a single message, using reply_to for the first one."""
+        """Send a single message; first chunk is a true Telegram-reply on the trigger."""
         display = text[:TELEGRAM_MSG_LIMIT]
         if not display.strip():
             return
 
+        reply_params: ReplyParameters | None = None
+        if self._messages_sent == 0 and self._reply_to is not None:
+            reply_params = ReplyParameters(
+                message_id=self._reply_to.message_id,
+                allow_sending_without_reply=True,
+            )
+
         try:
-            if self._messages_sent == 0 and self._reply_to:
-                msg = await self._reply_to.answer(display, parse_mode=parse_mode)
-            else:
-                msg = await self._bot.send_message(
-                    chat_id=self._chat_id,
-                    text=display,
-                    parse_mode=parse_mode,
-                    message_thread_id=self._thread_id,
-                )
+            msg = await self._bot.send_message(
+                chat_id=self._chat_id,
+                text=display,
+                parse_mode=parse_mode,
+                message_thread_id=self._thread_id,
+                reply_parameters=reply_params,
+            )
             self._last_msg = msg
             self._messages_sent += 1
         except TelegramBadRequest:
