@@ -93,19 +93,22 @@ class AuthMiddleware(BaseMiddleware):
     """Outer middleware: silently drop messages from unauthorized users/groups.
 
     In private chats only ``allowed_user_ids`` is checked.
-    In group/supergroup chats **both** the group (``allowed_group_ids``)
-    and the sender (``allowed_user_ids``) must be allowlisted.
+    In group/supergroup chats the group must be allowlisted. The sender must
+    also be allowlisted unless ``group_mention_only`` is enabled; addressed
+    message filtering then acts as the per-message gate.
     """
 
     def __init__(
         self,
         allowed_user_ids: set[int],
         *,
+        group_mention_only: bool = False,
         allowed_group_ids: set[int] | None = None,
         on_rejected: RejectedCallback | None = None,
     ) -> None:
         self._allowed_users = allowed_user_ids
         self._allowed_groups = allowed_group_ids if allowed_group_ids is not None else set()
+        self._group_mention_only = group_mention_only
         self._on_rejected = on_rejected
 
     async def __call__(
@@ -137,7 +140,7 @@ class AuthMiddleware(BaseMiddleware):
                 if self._on_rejected and chat:
                     self._on_rejected(chat.id, chat_type, chat.title or "")
                 return None
-            if user.id not in self._allowed_users:
+            if not self._group_mention_only and user.id not in self._allowed_users:
                 return None
         elif user.id not in self._allowed_users:
             return None
