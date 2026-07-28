@@ -29,17 +29,16 @@ def _looks_like_gemini_model(model: str) -> bool:
 
 def _validate_gemini_model(model: str) -> None:
     gemini_models = get_gemini_models()
-    if model in _GEMINI_ALIASES:
+    if model in _GEMINI_ALIASES or _looks_like_gemini_model(model):
         return
-    if gemini_models and model not in gemini_models:
+    if gemini_models:
         msg = f"Invalid Gemini model: {model}. Must be one of {sorted(gemini_models)}"
         raise DuctorError(msg)
-    if not gemini_models and not _looks_like_gemini_model(model):
-        msg = (
-            f"Invalid Gemini model: {model}. Must use a Gemini model ID "
-            "(e.g. gemini-2.5-pro) or Gemini alias."
-        )
-        raise DuctorError(msg)
+    msg = (
+        f"Invalid Gemini model: {model}. Must use a Gemini model ID "
+        "(e.g. gemini-2.5-pro) or Gemini alias."
+    )
+    raise DuctorError(msg)
 
 
 def _validate_task_provider(provider: str) -> None:
