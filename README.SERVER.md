@@ -81,5 +81,5 @@ docker volume rm ductor_antigravity_keyring
 
 ## 9. Webhook (опционально)
 
-Для минимального запуска webhook не нужен.  
+Для минимального запуска webhook не нужен.
 Если понадобится — открой `ports` в `docker-compose.yml` и включи `webhooks` в `config.json`.
