@@ -10,11 +10,9 @@
 | `feat/bot-conversation-hop-guard` | feat | Бот→бот через настоящий Telegram reply и hop-counter защита от петель |
 | `fix/config-reload-mtime-ns` | fix | Digest-based детектирование быстрых перезаписей `config.json` |
 | `fix/gemini-custom-model-validation` | fix | Разрешает custom/stale `gemini-*` для cron и убирает traceback у config errors |
-| `fix/codex-prompt-stdin` | fix | Передача больших Codex prompts через stdin вместо argv |
-| `fix/task-retention-cleanup` | fix | Автоочистка завершенных background tasks по age/count retention |
 | `fix/claude-omit-model-env` | fix | `DUCTOR_CLAUDE_OMIT_MODEL` для запуска Claude CLI без `--model` |
 | `local/config-and-bootstrap` | local | Runtime env overrides, rule-sync interval и permissive group auth |
-| `local/docker-and-ci` | local | Application Dockerfile, compose, GHCR workflow и Docker target в justfile |
+| `local/docker-and-ci` | local | Application Dockerfile с API extra, compose, GHCR workflow и Docker target в justfile |
 | `local/docs-and-notes` | local | Local rule additions, `PROJECT_MEMORY.md` и auth docs |
 | `local/meta` | local | Этот реестр и fork-overlay workflow |
 
@@ -22,7 +20,8 @@
 
 Следующие изменения больше не входят в `deploy`, потому что их поглотил
 upstream: Antigravity provider, Telegram reply context, Gemini auto-model и
-bundle discovery, queue filtering. `fix/cron-silent-success` тоже снят:
+bundle discovery, queue filtering, Codex prompt через stdin и retention
+завершенных background tasks. `fix/cron-silent-success` тоже снят:
 нужные cron jobs используют upstream-поле `silent_on_success=true` вместо
 магических ответов `OK`/`done`.
 
@@ -37,8 +36,6 @@ branches=(
   feat/bot-conversation-hop-guard
   fix/config-reload-mtime-ns
   fix/gemini-custom-model-validation
-  fix/codex-prompt-stdin
-  fix/task-retention-cleanup
   fix/claude-omit-model-env
   local/config-and-bootstrap
   local/docker-and-ci
