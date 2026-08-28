@@ -1,6 +1,6 @@
 # Project Memory
 
-Last updated: 2026-07-28
+Last updated: 2026-08-28
 
 ## Current State
 
@@ -17,6 +17,8 @@ Last updated: 2026-07-28
 - `fix/gemini-custom-model-validation`: treat discovered Gemini models as UI hints rather
   than an allowlist for `gemini-*` task models; log cron config errors without tracebacks.
 - `fix/claude-omit-model-env`: `DUCTOR_CLAUDE_OMIT_MODEL` support.
+- `fix/codex-invalid-previous-response`: one-shot fresh-session recovery when Codex rejects
+  resume state with `Invalid previous_response_id`.
 - `local/config-and-bootstrap`: runtime env overrides and permissive group auth when
   `group_mention_only=true`.
 - `local/docker-and-ci`: application image, provider CLIs, persistent Antigravity keyring,
