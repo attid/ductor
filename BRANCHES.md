@@ -11,6 +11,7 @@
 | `fix/config-reload-mtime-ns` | fix | Digest-based детектирование быстрых перезаписей `config.json` |
 | `fix/gemini-custom-model-validation` | fix | Разрешает custom/stale `gemini-*` для cron и убирает traceback у config errors |
 | `fix/claude-omit-model-env` | fix | `DUCTOR_CLAUDE_OMIT_MODEL` для запуска Claude CLI без `--model` |
+| `fix/codex-invalid-previous-response` | fix | Пересоздает Codex-сессию при `Invalid previous_response_id` |
 | `local/config-and-bootstrap` | local | Runtime env overrides, rule-sync interval и permissive group auth |
 | `local/docker-and-ci` | local | Application Dockerfile с API extra, compose, GHCR workflow и Docker target в justfile |
 | `local/docs-and-notes` | local | Local rule additions, `PROJECT_MEMORY.md` и auth docs |
@@ -37,6 +38,7 @@ branches=(
   fix/config-reload-mtime-ns
   fix/gemini-custom-model-validation
   fix/claude-omit-model-env
+  fix/codex-invalid-previous-response
   local/config-and-bootstrap
   local/docker-and-ci
   local/docs-and-notes
