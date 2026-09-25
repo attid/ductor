@@ -27,6 +27,7 @@ from ductor_bot.messenger.telegram.abort import (
     is_abort_message,
     is_interrupt_message,
 )
+from ductor_bot.messenger.telegram.conversation_guard import BotConversationGuard
 from ductor_bot.messenger.telegram.dedup import DedupeCache, build_dedup_key
 from ductor_bot.messenger.telegram.media import should_drop_in_group
 from ductor_bot.messenger.telegram.topic import (
@@ -168,6 +169,7 @@ class SequentialMiddleware(BaseMiddleware):
         lock_pool: LockPool | None = None,
         topic_names: TopicNameCache | None = None,
         *,
+        conversation_guard: BotConversationGuard | None = None,
         group_mention_only: bool = False,
     ) -> None:
         self._lock_pool = lock_pool if lock_pool is not None else LockPool()
@@ -182,6 +184,7 @@ class SequentialMiddleware(BaseMiddleware):
         self._bot: Bot | None = None
         self._bot_id: int | None = None
         self._bot_username: str | None = None
+        self._conversation_guard = conversation_guard
         self._group_mention_only = group_mention_only
 
     @property
@@ -299,6 +302,22 @@ class SequentialMiddleware(BaseMiddleware):
 
         return False
 
+    def _is_dropped_by_conversation_guard(self, event: Message) -> bool:
+        """Update hop counter and return True if this bot msg must be dropped."""
+        if self._conversation_guard is None or event.from_user is None:
+            return False
+        chat_key = (event.chat.id, event.message_thread_id)
+        if not event.from_user.is_bot:
+            self._conversation_guard.observe_user(chat_key)
+            return False
+        if self._conversation_guard.should_drop_bot(chat_key):
+            logger.info(
+                "Bot-conversation hop limit reached; dropping bot msg in chat=%d",
+                event.chat.id,
+            )
+            return True
+        return False
+
     def _is_unaddressed_group(self, event: Message) -> bool:
         """True if this group message is not addressed to us and must be dropped.
 
@@ -327,7 +346,7 @@ class SequentialMiddleware(BaseMiddleware):
     ) -> Any:
         if not isinstance(event, Message) or not event.chat:
             return await handler(event, data)
-        if self._is_unaddressed_group(event):
+        if self._is_unaddressed_group(event) or self._is_dropped_by_conversation_guard(event):
             return None
 
         topic_label: str | None = None

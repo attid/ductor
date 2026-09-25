@@ -34,6 +34,7 @@ from ductor_bot.messenger.telegram.callbacks import (
     parse_ns_callback,
 )
 from ductor_bot.messenger.telegram.chat_tracker import ChatRecord, ChatTracker
+from ductor_bot.messenger.telegram.conversation_guard import BotConversationGuard
 from ductor_bot.messenger.telegram.file_browser import (
     file_browser_start,
     handle_file_browser_callback,
@@ -224,10 +225,17 @@ class TelegramBot:
         from ductor_bot.messenger.telegram.transport import TelegramTransport
 
         self._bus.register_transport(TelegramTransport(self))
+        conversation_guard: BotConversationGuard | None = None
+        if config.bot_conversation_enabled:
+            conversation_guard = BotConversationGuard(
+                max_hops=config.bot_conversation_max_hops,
+                idle_reset_seconds=config.bot_conversation_idle_reset_seconds,
+            )
         self._sequential = SequentialMiddleware(
             lock_pool=self._lock_pool,
             topic_names=self._topic_names,
             group_mention_only=config.group_mention_only,
+            conversation_guard=conversation_guard,
         )
         self._sequential.set_bot(self._bot)
         self._sequential.set_interrupt_handler(self._on_interrupt)
