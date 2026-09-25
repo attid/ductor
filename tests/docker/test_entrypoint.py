@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import stat
 import subprocess
@@ -127,6 +128,80 @@ def test_dockerfile_installs_antigravity_and_keyring_runtime() -> None:
     assert 'ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/docker-entrypoint"]' in (
         dockerfile
     )
+
+
+def test_dockerfile_installs_billion_context() -> None:
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    npm_line = (
+        "npm install -g @openai/codex @anthropic-ai/claude-code @google/gemini-cli billion-context"
+    )
+    assert npm_line in dockerfile
+    assert "ACP_AUTO_UPDATE=0" in dockerfile
+
+
+def _fake_bili_tools(env: dict[str, str]) -> None:
+    fake_bin = Path(env["PATH"].split(":")[0])
+    _write_executable(
+        fake_bin / "bili",
+        '#!/bin/sh\ntouch "$PROBE_DIR/bili.ran"\nkill -TERM "$PPID"\n',
+    )
+    _write_executable(
+        fake_bin / "curl",
+        '#!/bin/sh\nprintf "%s\\n" "$*" >"$PROBE_DIR/curl.args"\n',
+    )
+
+
+def test_entrypoint_starts_bili_and_seeds_agent_configs(
+    entrypoint_env: tuple[dict[str, str], Path, Path],
+) -> None:
+    env, home, probe_dir = entrypoint_env
+    _fake_bili_tools(env)
+
+    result = _run_entrypoint(env)
+
+    assert result.returncode == 0, result.stderr
+    assert (probe_dir / "bili.ran").exists()
+    curl_args = (probe_dir / "curl.args").read_text(encoding="utf-8")
+    assert "http://127.0.0.1:8787/__bili/health" in curl_args
+    bili_state = home / ".ductor" / "billion-context"
+    assert (bili_state / "claude-mcp.json").read_text(encoding="utf-8") == (
+        '{"mcpServers":{"bili":{"command":"bili","args":["mcp"]}}}\n'
+    )
+    settings = json.loads((bili_state / "claude-bili-settings.json").read_text(encoding="utf-8"))
+    assert settings["env"]["ANTHROPIC_BASE_URL"] == (
+        "http://127.0.0.1:8787/bili/https://api.z.ai/api/anthropic"
+    )
+
+
+def test_bili_seed_does_not_overwrite_existing_configs(
+    entrypoint_env: tuple[dict[str, str], Path, Path],
+) -> None:
+    env, home, _probe_dir = entrypoint_env
+    _fake_bili_tools(env)
+    bili_state = home / ".ductor" / "billion-context"
+    bili_state.mkdir(parents=True)
+    (bili_state / "claude-mcp.json").write_text('{"mcpServers":{}}', encoding="utf-8")
+
+    result = _run_entrypoint(env)
+
+    assert result.returncode == 0, result.stderr
+    assert (bili_state / "claude-mcp.json").read_text(encoding="utf-8") == '{"mcpServers":{}}'
+
+
+def test_bili_disabled_by_env(
+    entrypoint_env: tuple[dict[str, str], Path, Path],
+) -> None:
+    env, home, probe_dir = entrypoint_env
+    fake_bin = Path(env["PATH"].split(":")[0])
+    _write_executable(fake_bin / "bili", '#!/bin/sh\ntouch "$PROBE_DIR/bili.ran"\n')
+    env["BILI_ENABLED"] = "0"
+
+    result = _run_entrypoint(env)
+
+    assert result.returncode == 0, result.stderr
+    assert not (probe_dir / "bili.ran").exists()
+    assert not (home / ".ductor" / "billion-context" / "claude-mcp.json").exists()
 
 
 @pytest.mark.parametrize("compose_name", ["docker-compose.yml", "docker-compose.example.yml"])

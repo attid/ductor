@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     DUCTOR_NO_UPDATE_CHECK=1 \
     AGY_CLI_DISABLE_AUTO_UPDATE=true \
+    ACP_AUTO_UPDATE=0 \
     VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     DUCTOR_HOME=/home/node/.ductor \
@@ -52,7 +53,7 @@ RUN uv venv "${VIRTUAL_ENV}" --python python3 \
     && uv pip install --python "${VIRTUAL_ENV}/bin/python" ".[api]"
 
 # Install CLI providers
-RUN npm install -g @openai/codex @anthropic-ai/claude-code @google/gemini-cli
+RUN npm install -g @openai/codex @anthropic-ai/claude-code @google/gemini-cli billion-context
 
 RUN curl -fsSL https://antigravity.google/cli/install.sh -o /tmp/install-agy.sh \
     && bash /tmp/install-agy.sh --dir /usr/local/bin \
