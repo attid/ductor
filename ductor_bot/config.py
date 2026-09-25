@@ -443,6 +443,7 @@ class AgentConfig(BaseModel):
     append_system_prompt_files: list[str] = Field(default_factory=list)
     # Per-topic project roots: topic name | "<topic_id>" | "<chat_id>:<topic_id>" -> path
     project_roots: dict[str, str] = Field(default_factory=dict)
+    rule_sync_interval_seconds: float = Field(default=10.0, ge=0.0)
     gemini_api_key: str | None = None
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)

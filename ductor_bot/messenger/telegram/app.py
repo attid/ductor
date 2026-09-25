@@ -243,11 +243,21 @@ class TelegramBot:
         self._sequential.set_abort_all_handler(self._on_abort_all)
         self._sequential.set_quick_command_handler(self._on_quick_command)
         on_rejected = self._on_group_rejected
-        auth = AuthMiddleware(allowed, allowed_group_ids=allowed_groups, on_rejected=on_rejected)
+        auth = AuthMiddleware(
+            allowed,
+            group_mention_only=config.group_mention_only,
+            allowed_group_ids=allowed_groups,
+            on_rejected=on_rejected,
+        )
         self._router.message.outer_middleware(auth)
         self._router.message.outer_middleware(self._sequential)
         self._router.callback_query.outer_middleware(
-            AuthMiddleware(allowed, allowed_group_ids=allowed_groups, on_rejected=on_rejected)
+            AuthMiddleware(
+                allowed,
+                group_mention_only=config.group_mention_only,
+                allowed_group_ids=allowed_groups,
+                on_rejected=on_rejected,
+            )
         )
 
         self._register_handlers()
