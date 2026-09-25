@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import time_machine
@@ -21,7 +22,11 @@ from ductor_bot.cron.execution import (
 )
 from ductor_bot.cron.manager import CronJob, CronManager
 from ductor_bot.cron.observer import CronObserver
+from ductor_bot.errors import DuctorError
 from ductor_bot.workspace.paths import DuctorPaths
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _make_paths(tmp_path: Path) -> DuctorPaths:
@@ -1147,6 +1152,40 @@ class TestCronResultDelivery:
         with patch.object(observer, "_execute_job", side_effect=RuntimeError("boom")):
             # Must not raise — the exception is logged and the job is rescheduled
             await observer._run_at(0, job)
+
+    async def test_run_at_logs_configuration_error_without_traceback(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        observer = _make_observer(paths, mgr)
+
+        from ductor_bot.cron.observer import _ScheduledJob
+
+        job = _ScheduledJob(
+            id="invalid-config",
+            schedule="* * * * *",
+            instruction="Do",
+            task_folder="invalid-config",
+            timezone="",
+        )
+
+        with (
+            caplog.at_level(logging.ERROR, logger="ductor_bot.cron.observer"),
+            patch.object(
+                observer,
+                "_execute_job",
+                side_effect=DuctorError("Invalid Gemini model: custom-model"),
+            ),
+        ):
+            await observer._run_at(0, job)
+
+        records = [record for record in caplog.records if record.levelno == logging.ERROR]
+        assert len(records) == 1
+        assert records[0].getMessage() == (
+            "Cron job invalid-config configuration error: Invalid Gemini model: custom-model"
+        )
+        assert records[0].exc_info is None
 
 
 class TestEnrichInstruction:
