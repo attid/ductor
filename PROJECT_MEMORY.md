@@ -37,6 +37,11 @@ Last updated: 2026-08-28
 
 - The application image installs ductor, current npm releases of Codex, Claude Code and
   Gemini CLI, plus the official Antigravity CLI (`agy`) at build time.
+- The image also ships `billion-context` (`bili`); the entrypoint runs it as a localhost
+  context-compression proxy on 127.0.0.1:8787 (opt-out `BILI_ENABLED=0`, auto-update
+  disabled via `ACP_AUTO_UPDATE=0`). Per-agent enablement goes through `cli_parameters`
+  (claude: `--settings` + `--mcp-config`; codex: `-c` config overrides) — snippets live
+  in `BRANCHES.md`. Proxy state lives under `$HOME` (bind-mounted on prod).
 - Ductor is installed with the `api` extra, including PyNaCl, so the optional encrypted
   WebSocket API can run in the application container.
 - The container entrypoint starts D-Bus and GNOME Keyring. Antigravity OAuth survives
