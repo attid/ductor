@@ -12,6 +12,8 @@
 | `fix/gemini-custom-model-validation` | fix | Разрешает custom/stale `gemini-*` для cron и убирает traceback у config errors |
 | `fix/claude-omit-model-env` | fix | `DUCTOR_CLAUDE_OMIT_MODEL` для запуска Claude CLI без `--model` |
 | `fix/codex-invalid-previous-response` | fix | Пересоздает Codex-сессию при `Invalid previous_response_id` |
+| `fix/mainmemory-injection-cap` | fix | Cap инъекции MAINMEMORY на старте сессии в 256 KiB — иначе жирная память провоцирует дорогой preflight в bili |
+| `fix/codex-resume-cli-parameters` | fix | Пробрасывает `cli_parameters` в codex resume-команды (раньше флаги жили только на первом спавне) |
 | `local/config-and-bootstrap` | local | Runtime env overrides, rule-sync interval и permissive group auth |
 | `local/docker-and-ci` | local | Application Dockerfile с API extra, compose, GHCR workflow, Docker target в justfile и billion-context прокси |
 | `local/docs-and-notes` | local | Local rule additions, `PROJECT_MEMORY.md` и auth docs |
@@ -39,6 +41,8 @@ branches=(
   fix/gemini-custom-model-validation
   fix/claude-omit-model-env
   fix/codex-invalid-previous-response
+  fix/mainmemory-injection-cap
+  fix/codex-resume-cli-parameters
   local/config-and-bootstrap
   local/docker-and-ci
   local/docs-and-notes
@@ -84,10 +88,11 @@ done
 Включение на конкретного агента — через `cli_parameters` (`config.json` для
 main, `agents.json` для сабов); агенты без поля наследуют пустые списки.
 
-Ограничение `cli_parameters` (актуально для codex): они дописываются только
-к первому спавну сессии — resume-ходы их НЕ получают (в
-`codex_provider._build_resume_command` флаги не пробрасываются). Для codex
-надежнее класть конфиг в `~/.codex/config.toml` (читается на каждом запуске):
+Ограничение `cli_parameters` (исправлено в `fix/codex-resume-cli-parameters`,
+действует с ближайшей пересборки `deploy`; в текущем образе на проде баг
+еще жив): они дописывались только к первому спавну сессии — resume-ходы
+флагов не получали. Для codex всё равно надежнее конфиг в
+`~/.codex/config.toml` (читается на каждом запуске, не зависит от ductor):
 
 ```toml
 [model_providers.ZAI]
