@@ -75,14 +75,39 @@ done
 `BILI_ENABLED=0` в environment сервиса. Состояние прокси живет в `$HOME`
 (на проде — bind `/home/node`), лог — `~/.local/state/billion-context/bili.log`.
 
-Файлы `~/.ductor/billion-context/claude-mcp.json` и
-`claude-bili-settings.json` сеет entrypoint при первом старте (только если
-файла нет), их можно править руками.
+Файл `~/.ductor/billion-context/claude-mcp.json` сеет entrypoint при первом
+старте (только если файла нет), его можно править руками. Сид с апстримом
+(`claude-bili-settings.json`) сознательно НЕ сеется: образ не должен знать
+ни одного действующего провайдера — файл с реальным апстримом создает
+деплой под себя.
 
 Включение на конкретного агента — через `cli_parameters` (`config.json` для
 main, `agents.json` для сабов); агенты без поля наследуют пустые списки.
 
-Claude:
+Ограничение `cli_parameters` (актуально для codex): они дописываются только
+к первому спавну сессии — resume-ходы их НЕ получают (в
+`codex_provider._build_resume_command` флаги не пробрасываются). Для codex
+надежнее класть конфиг в `~/.codex/config.toml` (читается на каждом запуске):
+
+```toml
+[model_providers.ZAI]
+base_url = "http://127.0.0.1:8787/bili/https://api.z.ai/api/v1"
+
+[mcp_servers.bili]
+command = "bili"
+args = ["mcp"]
+```
+
+и тогда `cli_parameters` у codex в ductor-конфиге надо убрать (`-c` сильнее
+toml и замаскирует его). Учти: config.toml глобален на контейнер — через
+bili пойдут все codex-агенты, а не только выбранные.
+
+Claude (файл настроек создается руками, апстрим свой):
+
+```sh
+printf '%s\n' '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787/bili/<АПСТРИМ>"}}' \
+  > ~/.ductor/billion-context/claude-bili-settings.json
+```
 
 ```json
 "cli_parameters": {
@@ -96,7 +121,7 @@ Claude:
 `--settings` — CLI-tier настроек claude, перебивает env из общих
 `~/.claude/settings.json`; auth-токен остается в общих настройках и мержится.
 
-Codex:
+Codex (если без config.toml, помня про resume-дырку выше):
 
 ```json
 "cli_parameters": {
@@ -109,9 +134,8 @@ Codex:
 ```
 
 `-c` имеет высший приоритет в codex, `~/.codex/config.toml` не меняется.
-Upstream URL оборачивается по схеме `<proxy>/bili/<текущий апстрим агента>` —
-в снипетах Z.ai (`api.z.ai/api/anthropic` для claude, `api.z.ai/api/v1` для
-codex); у агента с другим апстримом подставляется его URL.
+Upstream URL оборачивается по схеме `<proxy>/bili/<текущий апстрим агента>`;
+в примерах стоит условный Z.ai — подставляется реальный апстрим агента.
 
 ## Когда удалять ветку
 
