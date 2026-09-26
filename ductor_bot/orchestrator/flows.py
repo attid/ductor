@@ -83,6 +83,40 @@ def _make_timeout_controller(orch: Orchestrator, kind: str) -> TimeoutController
     )
 
 
+_MAINMEMORY_INJECT_MAX_BYTES = 256 * 1024
+_MAINMEMORY_TRUNCATED_NOTICE = (
+    "\n\n[MAINMEMORY.md is too large to inject fully — showing the first "
+    "{injected} of {original} bytes. The full file is at "
+    "memory_system/MAINMEMORY.md; read it with tools only if needed, and "
+    "compact it to the essentials.]"
+)
+
+
+def _cap_mainmemory(content: str) -> str:
+    """Cap the session-start MAINMEMORY injection.
+
+    The injection rides on the first message of every new session, so an
+    oversized memory file pushes the request past model/proxy context limits
+    before the conversation even starts. Mirrors the guard that
+    ``build_appended_files_block`` applies to ``append_system_prompt_files``.
+    """
+    if not content.strip():
+        return ""
+    blob = content.encode("utf-8")
+    if len(blob) <= _MAINMEMORY_INJECT_MAX_BYTES:
+        return content
+    trimmed = blob[:_MAINMEMORY_INJECT_MAX_BYTES].decode("utf-8", errors="ignore")
+    logger.warning(
+        "MAINMEMORY.md too large for injection: %d bytes, truncating to %d",
+        len(blob),
+        _MAINMEMORY_INJECT_MAX_BYTES,
+    )
+    return trimmed + _MAINMEMORY_TRUNCATED_NOTICE.format(
+        injected=len(trimmed.encode("utf-8")),
+        original=len(blob),
+    )
+
+
 async def _prepare_normal(
     orch: Orchestrator,
     key: SessionKey,
@@ -126,8 +160,7 @@ async def _prepare_normal(
     append_prompt = None
     if is_new:
         mainmemory = await asyncio.to_thread(read_mainmemory, orch.paths)
-        if mainmemory.strip():
-            append_prompt = mainmemory
+        append_prompt = _cap_mainmemory(mainmemory) or None
 
         roster = _build_agent_roster(orch)
         if roster:

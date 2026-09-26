@@ -10,6 +10,7 @@ import pytest
 from ductor_bot.cli.types import AgentResponse
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.orchestrator.flows import (
+    _MAINMEMORY_INJECT_MAX_BYTES,
     StreamingCallbacks,
     _finish_normal,
     _strip_ack_token,
@@ -71,6 +72,45 @@ async def test_normal_new_session_injects_mainmemory(orch: Orchestrator) -> None
     assert request.append_system_prompt is not None
     assert "Important Context" in request.append_system_prompt
     assert request.resume_session is None  # New session
+
+
+async def test_normal_new_session_truncates_oversized_mainmemory(orch: Orchestrator) -> None:
+    orch.paths.mainmemory_path.write_text("A" * (2 * _MAINMEMORY_INJECT_MAX_BYTES))
+    mock_execute = AsyncMock(return_value=_mock_response())
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+
+    await normal(orch, SessionKey(chat_id=1), "Hello")
+
+    request = mock_execute.call_args[0][0]
+    append = request.append_system_prompt
+    assert append is not None
+    blob = append.encode("utf-8")
+    assert len(blob) < 2 * _MAINMEMORY_INJECT_MAX_BYTES
+    assert "A" * 1000 in append  # head preserved
+    assert "too large to inject fully" in append
+
+
+async def test_normal_new_session_mainmemory_at_limit_untouched(orch: Orchestrator) -> None:
+    payload = "B" * _MAINMEMORY_INJECT_MAX_BYTES
+    orch.paths.mainmemory_path.write_text(payload)
+    mock_execute = AsyncMock(return_value=_mock_response())
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+
+    await normal(orch, SessionKey(chat_id=1), "Hello")
+
+    request = mock_execute.call_args[0][0]
+    assert request.append_system_prompt == payload
+
+
+async def test_normal_new_session_whitespace_mainmemory_no_append(orch: Orchestrator) -> None:
+    orch.paths.mainmemory_path.write_text("   \n\n  ")
+    mock_execute = AsyncMock(return_value=_mock_response())
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+
+    await normal(orch, SessionKey(chat_id=1), "Hello")
+
+    request = mock_execute.call_args[0][0]
+    assert request.append_system_prompt is None
 
 
 async def test_normal_resume_session_no_append(orch: Orchestrator) -> None:
