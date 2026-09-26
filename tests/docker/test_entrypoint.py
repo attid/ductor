@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import stat
 import subprocess
@@ -168,10 +167,8 @@ def test_entrypoint_starts_bili_and_seeds_agent_configs(
     assert (bili_state / "claude-mcp.json").read_text(encoding="utf-8") == (
         '{"mcpServers":{"bili":{"command":"bili","args":["mcp"]}}}\n'
     )
-    settings = json.loads((bili_state / "claude-bili-settings.json").read_text(encoding="utf-8"))
-    assert settings["env"]["ANTHROPIC_BASE_URL"] == (
-        "http://127.0.0.1:8787/bili/https://api.z.ai/api/anthropic"
-    )
+    # claude routing is deployment-specific; the image must not seed any upstream.
+    assert not (bili_state / "claude-bili-settings.json").exists()
 
 
 def test_bili_seed_does_not_overwrite_existing_configs(

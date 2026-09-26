@@ -35,10 +35,6 @@ if [ "${BILI_ENABLED:-1}" = "1" ] && command -v bili >/dev/null 2>&1; then
         printf '%s\n' '{"mcpServers":{"bili":{"command":"bili","args":["mcp"]}}}' \
             >"$bili_dir/claude-mcp.json"
     fi
-    if [ ! -f "$bili_dir/claude-bili-settings.json" ]; then
-        printf '%s\n' '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787/bili/https://api.z.ai/api/anthropic"}}' \
-            >"$bili_dir/claude-bili-settings.json"
-    fi
     (
         set +e
         while :; do
