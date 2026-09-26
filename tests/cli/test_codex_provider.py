@@ -334,6 +334,22 @@ class TestBuildCommand:
         cmd = cli._build_command("hello", resume_session="thread-abc")
         assert "-c" not in cmd
 
+    def test_resume_includes_cli_parameters(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # cli_parameters configure per-spawn behavior (proxy routing, MCP
+        # servers); resumed turns must carry them too.
+        cli = _make_cli(monkeypatch, cli_parameters=["-c", 'mcp_servers.bili.command="bili"'])
+        cmd = cli._build_command("hello", resume_session="thread-abc")
+        assert "-c" in cmd
+        assert 'mcp_servers.bili.command="bili"' in cmd
+        # Parameters must precede the "--" session separator.
+        assert cmd.index('mcp_servers.bili.command="bili"') < cmd.index("--")
+
+    def test_fresh_spawn_includes_cli_parameters(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        cli = _make_cli(monkeypatch, cli_parameters=["--color", "never"])
+        cmd = cli._build_command("hello")
+        assert "--color" in cmd
+        assert cmd.index("never") < cmd.index("--")
+
 
 # ---------------------------------------------------------------------------
 # _parse_output (static method)
