@@ -6,6 +6,7 @@ import contextlib
 import logging
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -125,6 +126,58 @@ def _alive_pids(pids: list[int]) -> list[int]:
     return [pid for pid in pids if _is_process_alive(pid)]
 
 
+def _argv_looks_like_ductor(argv: list[bytes]) -> bool:
+    """Match structural launch signatures against NUL-split cmdline tokens."""
+    if not argv:
+        return False
+    basename0 = argv[0].rsplit(b"/", 1)[-1]
+    if basename0 in (b"ductor", b"ductor_bot"):
+        return True
+    if not basename0.startswith((b"python", b"pypy")):
+        return False
+    for i, token in enumerate(argv[1:], start=1):
+        basename = token.rsplit(b"/", 1)[-1]
+        if argv[i - 1] == b"-m" and basename.startswith(b"ductor_bot"):
+            return True
+        if i == 1:
+            is_script = basename == b"ductor" or (
+                basename == b"__main__.py" and b"ductor_bot" in token
+            )
+            if is_script:
+                return True
+    return False
+
+
+def _is_ductor_process(pid: int) -> bool | None:
+    """Best-effort identity probe for a live PID via ``/proc/<pid>/cmdline``.
+
+    Matches only structural signatures of a ductor launch (see
+    ``_argv_looks_like_ductor``): flag values and path arguments of unrelated
+    tools (``journalctl -u ductor``, ``git diff ductor_bot/...``,
+    ``grep -r foo /home/user/ductor``) do not match. Returns True/False when
+    the command line is readable, None when identity cannot be determined
+    (non-Linux platform, restricted /proc) so callers keep the legacy
+    behavior. A vanished ``/proc/<pid>`` (process exited between the
+    liveness check and this read) and an empty cmdline (zombie, kernel
+    thread) read as False: a dead process cannot be a running instance.
+
+    Limitation: launchers with no ductor token in argv (a custom
+    ``python run.py`` wrapper) are indistinguishable from foreign processes
+    and are treated as stale.
+    """
+    if sys.platform != "linux":
+        return None
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None
+    if not cmdline:
+        return False
+    return _argv_looks_like_ductor(cmdline.split(b"\x00"))
+
+
 def acquire_lock(*, pid_file: Path, kill_existing: bool = False) -> None:
     """Write PID file after ensuring no other instance is running.
 
@@ -141,8 +194,21 @@ def acquire_lock(*, pid_file: Path, kill_existing: bool = False) -> None:
         except (ValueError, OSError):
             existing_pid = None
 
-        if existing_pid is not None and _is_process_alive(existing_pid):
-            if kill_existing:
+        if existing_pid == os.getpid():
+            # A persistent pid_file can survive container recreation, and a
+            # fresh PID namespace reuses the same deterministic PID. Liveness
+            # would match this very process and the kill branch would take
+            # down the process subtree (e.g. sidecars started by the
+            # entrypoint), so the file is simply stale.
+            logger.warning("Stale PID file contains our own pid=%d, overwriting", existing_pid)
+        elif existing_pid is not None and _is_process_alive(existing_pid):
+            if _is_ductor_process(existing_pid) is False:
+                logger.warning(
+                    "PID %d is alive but is not a ductor process (stale after PID reuse),"
+                    " overwriting",
+                    existing_pid,
+                )
+            elif kill_existing:
                 _kill_and_wait(existing_pid)
             else:
                 logger.error(
