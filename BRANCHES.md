@@ -14,6 +14,7 @@
 | `fix/codex-invalid-previous-response` | fix | Пересоздает Codex-сессию при `Invalid previous_response_id` |
 | `fix/mainmemory-injection-cap` | fix | Cap инъекции MAINMEMORY на старте сессии в 256 KiB — иначе жирная память провоцирует дорогой preflight в bili |
 | `fix/codex-resume-cli-parameters` | fix | Пробрасывает `cli_parameters` в codex resume-команды (раньше флаги жили только на первом спавне) |
+| `fix/pidlock-own-pid-stale` | fix | PID-лок переживает пересоздание контейнера: свой pid и живой не-ductor в bot.pid считаются stale — иначе kill-ветка убивала bili sidecar |
 | `local/config-and-bootstrap` | local | Runtime env overrides, rule-sync interval и permissive group auth |
 | `local/docker-and-ci` | local | Application Dockerfile с API extra, compose, GHCR workflow, Docker target в justfile и billion-context прокси |
 | `local/docs-and-notes` | local | Local rule additions, `PROJECT_MEMORY.md` и auth docs |
@@ -43,6 +44,7 @@ branches=(
   fix/codex-invalid-previous-response
   fix/mainmemory-injection-cap
   fix/codex-resume-cli-parameters
+  fix/pidlock-own-pid-stale
   local/config-and-bootstrap
   local/docker-and-ci
   local/docs-and-notes
