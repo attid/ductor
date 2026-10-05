@@ -223,11 +223,23 @@ def test_resolve_gemini_model_from_discovery(
     assert result.model == "gemini-2.5-pro"
 
 
-def test_resolve_gemini_invalid_against_discovered_models(
+def test_resolve_gemini_prefixed_model_missing_from_discovery(
+    base_config: AgentConfig, codex_cache: CodexModelCache
+) -> None:
+    set_gemini_models(frozenset({"gemini-3.5-flash", "gemini-3.1-pro-preview"}))
+    overrides = TaskOverrides(provider="gemini", model="gemini-2.5-flash-lite")
+
+    result = resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
+
+    assert result.provider == "gemini"
+    assert result.model == "gemini-2.5-flash-lite"
+
+
+def test_resolve_non_gemini_model_invalid_against_discovered_models(
     base_config: AgentConfig, codex_cache: CodexModelCache
 ) -> None:
     set_gemini_models(frozenset({"gemini-2.5-pro"}))
-    overrides = TaskOverrides(provider="gemini", model="gemini-3-pro-preview")
+    overrides = TaskOverrides(provider="gemini", model="custom-model")
 
     with pytest.raises(DuctorError, match="Invalid Gemini model"):
         resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
