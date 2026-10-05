@@ -864,6 +864,20 @@ def test_is_invalid_session_matches_codex_resume_rollout_error() -> None:
     assert _is_invalid_session(response) is True
 
 
+def test_is_invalid_session_matches_codex_invalid_previous_response_id() -> None:
+    """Codex can retain an upstream response ID that is no longer resumable."""
+    from ductor_bot.orchestrator.flows import _is_invalid_session
+
+    response = AgentResponse(
+        result=(
+            '{"error":{"message":"Invalid `previous_response_id`.",'
+            '"type":"invalid_request_error","code":"invalid_request_error"}}'
+        ),
+        is_error=True,
+    )
+    assert _is_invalid_session(response) is True
+
+
 def test_finish_normal_substitutes_empty_success_with_fallback() -> None:
     """#84: successful turn with empty result -- e.g. agent spent the turn
     writing to memory -- must yield a non-empty visible status message so

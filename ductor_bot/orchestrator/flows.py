@@ -275,6 +275,7 @@ _INVALID_SESSION_MARKERS = (
     "no conversation found",
     "no rollout found",
     "thread/resume failed",
+    "invalid `previous_response_id`",
 )
 
 
