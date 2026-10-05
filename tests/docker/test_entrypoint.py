@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -9,6 +10,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).parents[2]
 ENTRYPOINT = REPO_ROOT / "docker-entrypoint.sh"
+
+_SETSID_MISSING = "setsid not available on this host"
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -27,7 +30,9 @@ def entrypoint_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
 
     _write_executable(
         fake_bin / "dbus-daemon",
-        '#!/bin/sh\nprintf "%s\\n" "$*" >"$PROBE_DIR/dbus.args"\n',
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$*" >"$PROBE_DIR/dbus.args"\n'
+        'ps -o sid= -p $$ | tr -d " " >"$PROBE_DIR/entrypoint.sid"\n',
     )
     _write_executable(
         fake_bin / "gnome-keyring-daemon",
@@ -140,14 +145,30 @@ def test_dockerfile_installs_billion_context() -> None:
 
 
 def _fake_bili_tools(env: dict[str, str]) -> None:
+    """Fake bili/curl where curl only succeeds once bili has actually run.
+
+    This makes the entrypoint's own health-wait loop the synchronization
+    point, mirroring production ordering: bili runs before exec ductor.
+    The fake bili also records its PPID, the loop shell's parent, and its
+    session id so tests can assert the loop left ductor's process tree.
+    """
     fake_bin = Path(env["PATH"].split(":")[0])
     _write_executable(
         fake_bin / "bili",
-        '#!/bin/sh\ntouch "$PROBE_DIR/bili.ran"\nkill -TERM "$PPID"\n',
+        "#!/bin/sh\n"
+        "{\n"
+        '    printf "ppid=%s\\n" "$PPID"\n'
+        '    printf "loop_ppid=%s\\n" "$(awk \'{print $4}\' "/proc/$PPID/stat" 2>/dev/null)"\n'
+        '    printf "sid=%s\\n" "$(ps -o sid= -p $$ 2>/dev/null | tr -d " ")"\n'
+        '} >"$PROBE_DIR/bili.meta"\n'
+        # Readiness flag last: the health loop may proceed only once the meta
+        # probe is fully written.
+        'touch "$PROBE_DIR/bili.ran"\n'
+        'kill -TERM "$PPID"\n',
     )
     _write_executable(
         fake_bin / "curl",
-        '#!/bin/sh\nprintf "%s\\n" "$*" >"$PROBE_DIR/curl.args"\n',
+        '#!/bin/sh\nprintf "%s\\n" "$*" >"$PROBE_DIR/curl.args"\n[ -f "$PROBE_DIR/bili.ran" ]\n',
     )
 
 
@@ -160,7 +181,8 @@ def test_entrypoint_starts_bili_and_seeds_agent_configs(
     result = _run_entrypoint(env)
 
     assert result.returncode == 0, result.stderr
-    assert (probe_dir / "bili.ran").exists()
+    # The health-wait loop only succeeds once bili has run.
+    assert (probe_dir / "bili.ran").exists(), f"bili never ran; probe: {list(probe_dir.iterdir())}"
     curl_args = (probe_dir / "curl.args").read_text(encoding="utf-8")
     assert "http://127.0.0.1:8787/__bili/health" in curl_args
     bili_state = home / ".ductor" / "billion-context"
@@ -169,6 +191,42 @@ def test_entrypoint_starts_bili_and_seeds_agent_configs(
     )
     # claude routing is deployment-specific; the image must not seed any upstream.
     assert not (bili_state / "claude-bili-settings.json").exists()
+
+
+@pytest.mark.skipif(shutil.which("setsid") is None, reason=_SETSID_MISSING)
+def test_bili_loop_leaves_ductor_process_tree(
+    entrypoint_env: tuple[dict[str, str], Path, Path],
+) -> None:
+    """The detached loop is orphaned to init, outside the bot's process tree."""
+    env, _home, probe_dir = entrypoint_env
+    _fake_bili_tools(env)
+
+    proc = subprocess.Popen(
+        [
+            str(ENTRYPOINT),
+            "/bin/sh",
+            "-c",
+            'printf "%s" "$DBUS_SESSION_BUS_ADDRESS" >"$PROBE_DIR/command.bus"',
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        text=True,
+    )
+    _, stderr = proc.communicate(timeout=60)
+
+    assert proc.returncode == 0, stderr
+    assert (probe_dir / "bili.meta").exists(), (
+        f"missing bili.meta; probe: {list(probe_dir.iterdir())}"
+    )
+    meta = dict(
+        line.split("=", 1)
+        for line in (probe_dir / "bili.meta").read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    entrypoint_sid = int((probe_dir / "entrypoint.sid").read_text(encoding="utf-8"))
+    assert meta["sid"] != str(entrypoint_sid), "bili loop stayed in the entrypoint session"
+    assert meta["loop_ppid"] != str(proc.pid), "bili loop is still a child of the bot process"
 
 
 def test_bili_seed_does_not_overwrite_existing_configs(

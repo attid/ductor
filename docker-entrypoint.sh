@@ -35,13 +35,17 @@ if [ "${BILI_ENABLED:-1}" = "1" ] && command -v bili >/dev/null 2>&1; then
         printf '%s\n' '{"mcpServers":{"bili":{"command":"bili","args":["mcp"]}}}' \
             >"$bili_dir/claude-mcp.json"
     fi
-    (
-        set +e
+    # Detached via setsid -f: the loop orphans to init, leaving ductor's
+    # process tree, so no tree-kill aimed at the bot can take the proxy down
+    # and it cannot become the bot's unreaped zombie. On container stop bili
+    # dies with the PID namespace without a graceful SIGTERM - acceptable for
+    # a stateless proxy.
+    setsid -f sh -c '
         while :; do
             bili
             sleep 2
         done
-    ) >/dev/null 2>&1 &
+    ' </dev/null >/dev/null 2>&1
     bili_port="${ACP_PORT:-8787}"
     bili_tries=0
     while [ "$bili_tries" -lt 40 ]; do
